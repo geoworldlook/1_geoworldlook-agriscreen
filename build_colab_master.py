@@ -206,15 +206,52 @@ except Exception as e:
     add_code("""import geopandas as gpd
 
 # Bezpieczne wczytanie poswiadczen Copernicus Data Space Ecosystem (CDSE)
-# Wpisz je w lewym panelu Colab: 'Secrets' (ikona klucza) jako CDSE_CLIENT_ID i CDSE_CLIENT_SECRET
+# Metoda 1: Panel Secrets (ikona klucza w lewym menu Colab)
+# Metoda 2: Zmienne srodowiskowe
+# Metoda 3: Prywatny plik .env na Dysku Google (chroniony przez .gitignore)
+# Metoda 4: Interaktywny bezpieczny monit (input / getpass)
+import getpass
+
+cdse_id = ""
+cdse_secret = ""
 try:
     from google.colab import userdata
     cdse_id = userdata.get('CDSE_CLIENT_ID')
     cdse_secret = userdata.get('CDSE_CLIENT_SECRET')
 except Exception:
-    import os
+    pass
+
+if not cdse_id or not cdse_secret:
     cdse_id = os.environ.get('CDSE_CLIENT_ID', '')
     cdse_secret = os.environ.get('CDSE_CLIENT_SECRET', '')
+
+env_path = os.path.join(PROJECT_DIR, '.env')
+if (not cdse_id or not cdse_secret) and os.path.exists(env_path):
+    try:
+        with open(env_path, 'r', encoding='utf-8') as ef:
+            for line in ef:
+                line = line.strip()
+                if line.startswith('CDSE_CLIENT_ID='):
+                    cdse_id = line.split('=', 1)[1].strip().strip('"').strip("'")
+                elif line.startswith('CDSE_CLIENT_SECRET='):
+                    cdse_secret = line.split('=', 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+
+if not cdse_id or not cdse_secret:
+    print('[INFO] Nie wykryto kluczy w Colab Secrets ani w pliku .env.')
+    print('Mozesz podac je ponizej - zostana zapisane do prywatnego pliku .env na Twoim Dysku Google:')
+    try:
+        user_in_id = input('Podaj CDSE_CLIENT_ID (lub wcisnij Enter, jesli dodasz w Secrets): ').strip()
+        if user_in_id:
+            user_in_sec = getpass.getpass('Podaj CDSE_CLIENT_SECRET: ').strip()
+            cdse_id = user_in_id
+            cdse_secret = user_in_sec
+            with open(env_path, 'w', encoding='utf-8') as ef:
+                ef.write(f'CDSE_CLIENT_ID={cdse_id}\\nCDSE_CLIENT_SECRET={cdse_secret}\\n')
+            print(f'[OK] Zapisano klucze do: {env_path} (plik jest w .gitignore, 100% bezpieczny).')
+    except Exception as _e:
+        print(f'[INFO] Pominieto interaktywny wpis: {_e}')
 
 CONFIG = {
     'LAT': 43.9752,

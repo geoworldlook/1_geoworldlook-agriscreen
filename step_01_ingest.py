@@ -410,21 +410,27 @@ def get_cdse_credentials(
     if c_id and c_sec:
         return str(c_id).strip(), str(c_sec).strip()
 
-    # 3. Lokalny plik .env
-    env_file = os.path.join(os.path.dirname(__file__), ".env")
-    if os.path.exists(env_file):
-        try:
-            with open(env_file, "r", encoding="utf-8") as ef:
-                for line in ef:
-                    line = line.strip()
-                    if line.startswith("CDSE_CLIENT_ID="):
-                        c_id = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    elif line.startswith("CDSE_CLIENT_SECRET="):
-                        c_sec = line.split("=", 1)[1].strip().strip('"').strip("'")
-            if c_id and c_sec:
-                return c_id, c_sec
-        except Exception:
-            pass
+    # 3. Lokalny plik .env (katalog modulu, CWD lub Dysk Google w Colab)
+    env_candidates = [
+        os.path.join(os.path.dirname(__file__), ".env"),
+        os.path.join(os.getcwd(), ".env"),
+        "/content/drive/MyDrive/1_geoworldlook-agriscreen/.env",
+        "/content/drive/MyDrive/2_geoworldlook/.env"
+    ]
+    for env_file in env_candidates:
+        if os.path.exists(env_file):
+            try:
+                with open(env_file, "r", encoding="utf-8") as ef:
+                    for line in ef:
+                        line = line.strip()
+                        if line.startswith("CDSE_CLIENT_ID="):
+                            c_id = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        elif line.startswith("CDSE_CLIENT_SECRET="):
+                            c_sec = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if c_id and c_sec:
+                    return str(c_id).strip(), str(c_sec).strip()
+            except Exception:
+                pass
 
     return None, None
 
