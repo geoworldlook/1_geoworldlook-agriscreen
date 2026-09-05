@@ -2,6 +2,7 @@
 ================================================================================
 Skrypt budujący Master Jupyter Notebook dedykowany dla Google Colab
 z bezpośrednim importem modułów z Dysku Google (czysta architektura modułowa).
+Bez emotikon.
 ================================================================================
 """
 import json
@@ -37,7 +38,7 @@ def create_master_notebook():
         })
 
     # 1. Tytuł i Wprowadzenie
-    add_md("""# 🛰️ S-3/S-2 AgriScreen DSS v2.5 (Google Colab Master Pipeline)
+    add_md("""# S-3/S-2 AgriScreen DSS v2.5 (Google Colab Master Pipeline)
 ### Kompleksowy System Wczesnego Wykrywania Anomalii Wilgotnościowych i Fizjologicznych w Uprawach Wieloletnich
 **Środowisko:** Google Colab (GPU T4, 12 GB RAM) | Google Earth Engine (GEE)  
 **Trwałe przechowywanie danych:** Dysk Google  
@@ -46,7 +47,7 @@ def create_master_notebook():
 **Dane satelitarne:** Sentinel-2 L2A (10m/20m), Sentinel-3 SLSTR LST (1km), Copernicus DEM GLO-30, HRL Cropland (10m), CGLS SWI T=5 (1km), HR-VPP ST PPI (10m)""")
 
     # 2. Montowanie Dysku Google i sys.path
-    add_md("""## 📁 Krok 1: Montowanie Dysku Google i Przygotowanie Środowiska Modułowego
+    add_md("""## Krok 1: Montowanie Dysku Google i Przygotowanie Środowiska Modułowego
 Wszystkie moduły (`step_01_ingest.py`, `step_02_align_and_scale.py`, itd.), dane wejściowe, pośrednie i wynikowe COG GeoTIFF znajdują się bezpośrednio na Twoim Dysku Google.
 Dzięki `%load_ext autoreload` każda zmiana w plikach `.py` na Dysku jest natychmiast uwzględniana bez restartu jądra.""")
 
@@ -58,10 +59,10 @@ try:
     from google.colab import drive
     drive.mount('/content/drive')
     IN_COLAB = True
-    print('✅ Zamontowano Dysk Google.')
+    print('[OK] Zamontowano Dysk Google.')
 except Exception:
     IN_COLAB = False
-    print('ℹ️ Uruchomienie lokalne poza Google Colab.')
+    print('[INFO] Uruchomienie lokalne poza Google Colab.')
 
 # 2. Automatyczne wykrycie lub ręczne wskazanie katalogu projektu na Dysku Google
 REPO_URL = 'https://github.com/geoworldlook/1_geoworldlook-agriscreen.git'
@@ -84,10 +85,10 @@ if PROJECT_DIR is None:
 
 # Jeśli folder nie istnieje lub nie zawiera jeszcze kodu, sklonuj repozytorium:
 if not os.path.exists(os.path.join(PROJECT_DIR, 'step_01_ingest.py')):
-    print(f'📥 Klonowanie repozytorium GitHub do: {PROJECT_DIR}...')
+    print(f'[INFO] Klonowanie repozytorium GitHub do: {PROJECT_DIR}...')
     !git clone {REPO_URL} "{PROJECT_DIR}"
 
-print(f'📂 Katalog roboczy projektu: {PROJECT_DIR}')
+print(f'[INFO] Katalog roboczy projektu: {PROJECT_DIR}')
 
 # 3. Ustawienie bieżącego katalogu roboczego i dodanie do sys.path (importy modułowe)
 os.chdir(PROJECT_DIR)
@@ -102,13 +103,13 @@ if 'imp' not in sys.modules:
 try:
     %load_ext autoreload
     %autoreload 2
-    print('✅ Włączono automatyczne przeładowywanie modułów (%autoreload 2).')
+    print('[OK] Włączono automatyczne przeładowywanie modułów (%autoreload 2).')
 except Exception as e:
-    print(f'ℹ️ Informacja: autoreload pominięty ({e}).')
+    print(f'[INFO] autoreload pominięty ({e}).')
 
 # 5. Pobranie najnowszych zmian z GitHub na Dysk Google
 if os.path.exists(os.path.join(PROJECT_DIR, '.git')):
-    print('🔄 Wykryto repozytorium Git. Pobieranie najnowszych aktualizacji ze skryptów...')
+    print('[GIT] Wykryto repozytorium Git. Pobieranie najnowszych aktualizacji ze skryptów...')
     !git -C "{PROJECT_DIR}" pull
 
 # 6. Utworzenie wymaganej struktury katalogów na dane (jeśli jeszcze nie istnieją)
@@ -134,16 +135,17 @@ expected_files = [
 ]
 missing = [f for f in expected_files if not os.path.exists(os.path.join(PROJECT_DIR, f))]
 if missing:
-    print(f'⚠️ OSTRZEŻENIE: Następujące pliki nie zostały znalezione w {PROJECT_DIR}:')
+    print(f'[OSTRZEŻENIE] Następujące pliki nie zostały znalezione w {PROJECT_DIR}:')
     for m in missing:
         print(f'   - {m}')
     print('Upewnij się, że zmienna PROJECT_DIR wskazuje na właściwy folder z wgranym projektem.')
 else:
-    print('✅ Wszystkie moduły potoku i pliki konfiguracyjne są obecne i gotowe do importu!')
+    print('[OK] Wszystkie moduły potoku i pliki konfiguracyjne są obecne i gotowe do importu!')
 """)
 
     # 2b. Opcjonalna komórka do szybkiej synchronizacji Git
-    add_md("### 🔄 Szybka synchronizacja zmian z GitHub (`git pull`)\nUruchom tę komórkę w dowolnym momencie, gdy wprowadzimy zmiany w plikach `.py` i wyślemy je na GitHub:")
+    add_md("""### Szybka synchronizacja zmian z GitHub (`git pull`)
+Uruchom tę komórkę w dowolnym momencie, gdy wprowadzimy zmiany w plikach `.py` i wyślemy je na GitHub:""")
     add_code("""!git -C "{PROJECT_DIR}" pull
 
 # Wymuszenie przeładowania modułów w pamięci jądra
@@ -151,11 +153,11 @@ import importlib
 for mod_name in ['step_01_ingest', 'step_02_align_and_scale', 'step_03_super_resolve', 'step_04_metrics_alert', 'step_05_colab_run']:
     if mod_name in sys.modules:
         importlib.reload(sys.modules[mod_name])
-print('✅ Moduły potoku zsynchronizowane i przeładowane!')
+print('[OK] Moduły potoku zsynchronizowane i przeładowane!')
 """)
 
     # 3. Weryfikacja GPU T4
-    add_md("## ⚡ Krok 2: Weryfikacja Akceleratora Graficznego (GPU T4)")
+    add_md("## Krok 2: Weryfikacja Akceleratora Graficznego (GPU T4)")
 
     add_code("""!nvidia-smi
 
@@ -168,18 +170,18 @@ if torch.cuda.is_available():
 """)
 
     # 4. Instalacja Zależności
-    add_md("## 📦 Krok 3: Instalacja Bibliotek Teledetekcyjnych i Uczenia Maszynowego")
+    add_md("## Krok 3: Instalacja Bibliotek Teledetekcyjnych i Uczenia Maszynowego")
 
     add_code("""# Instalacja pakietów geoprzestrzennych, silnika GEE i przetwarzania rastrów
 !pip install -q earthengine-api geemap geedim rasterio geopandas scikit-image scikit-learn scipy affine shapely
 # Zaawansowane biblioteki super-rozdzielczości i korejestracji (opcjonalne/fallback)
 !pip install -q mlstac sen2sr arosics pydms || true
 
-print('✅ Pakiety teledetekcyjne zostały pomyślnie zweryfikowane i zainstalowane!')
+print('[OK] Pakiety teledetekcyjne zostały pomyślnie zweryfikowane i zainstalowane!')
 """)
 
     # 5. Inicjalizacja GEE
-    add_md("## 🔑 Krok 4: Autoryzacja i Inicjalizacja Google Earth Engine (GEE)")
+    add_md("## Krok 4: Autoryzacja i Inicjalizacja Google Earth Engine (GEE)")
 
     add_code("""import ee
 import geemap
@@ -187,7 +189,7 @@ import geemap
 print('Inicjalizacja Google Earth Engine...')
 try:
     ee.Initialize()
-    print('✅ Google Earth Engine jest już zainicjalizowany!')
+    print('[OK] Google Earth Engine jest już zainicjalizowany!')
 except Exception as e:
     print('Wymagana autoryzacja GEE. Postępuj zgodnie z instrukcją na ekranie:')
     ee.Authenticate()
@@ -200,11 +202,11 @@ except Exception as e:
             ee.Initialize(project=project_id)
         else:
             raise init_err
-    print('✅ Pomyślnie uwierzytelniono GEE!')
+    print('[OK] Pomyślnie uwierzytelniono GEE!')
 """)
 
     # 6. Konfiguracja i Podgląd AOI
-    add_md("## 🗺️ Krok 5: Konfiguracja Parametrów i Wizualizacja Działek na Mapie Interaktywnej")
+    add_md("## Krok 5: Konfiguracja Parametrów i Wizualizacja Działek na Mapie Interaktywnej")
 
     add_code("""import geopandas as gpd
 
@@ -231,7 +233,8 @@ m
 """)
 
     # 7. Moduł 1: Ingestia
-    add_md("## 🛰️ MODUŁ 1: Ingestia Rzeczywistych Danych Satelitarnych i Bazy GEE (`step_01_ingest.py`)\nPobiera z GEE: Sentinel-2 L2A (10 pasm BOA z maską chmur i geometryczną projekcją cieni), Sentinel-3 / 1km LST, Copernicus DEM GLO-30, Maskę Upraw Trwałych ($M_{crop}$), CGLS SWI $T=5$ oraz fenologię HR-VPP PPI wraz z wieloletnią bazą referencyjną 2018–2025.")
+    add_md("""## MODUŁ 1: Ingestia Rzeczywistych Danych Satelitarnych i Bazy GEE (`step_01_ingest.py`)
+Pobiera z GEE: Sentinel-2 L2A (10 pasm BOA z maską chmur i geometryczną projekcją cieni), Sentinel-3 / 1km LST, Copernicus DEM GLO-30, Maskę Upraw Trwałych ($M_{crop}$), CGLS SWI $T=5$ oraz fenologię HR-VPP PPI wraz z wieloletnią bazą referencyjną 2018–2025.""")
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
 from step_01_ingest import ingest_satellite_data
@@ -246,7 +249,7 @@ s2_bands, profile_10m, baseline_stats = ingest_satellite_data(
     download_historical_series=CONFIG['DOWNLOAD_HISTORICAL']
 )
 
-print('✅ KROK 1 ZAKOŃCZONY POMYŚLNIE:')
+print('[OK] KROK 1 ZAKOŃCZONY POMYŚLNIE:')
 print(f' - Pobrane pasma S2: {list(s2_bands.keys())}')
 print(f' - Rozmiar siatki 10m: {s2_bands[\"B04\"].shape}')
 print(f' - Maska HRL M_crop: {s2_bands[\"crop_mask\"].shape} (sad_jablonek, winnice)')
@@ -256,7 +259,8 @@ print(f' - Profil CRS: {profile_10m[\"crs\"]}')
 """)
 
     # 8. Moduł 2: Downscaling pyDMS
-    add_md("## 🌡️ MODUŁ 2: Korejestracja AROSICS i Downscaling Termiczny pyDMS (`step_02_align_and_scale.py`)\nSubpikselowa korejestracja korelacji fazowej, korekta adiabatyczna do poziomu morza ($LST + 0.006 \cdot DEM$), deagregacja pyDMS (bagging drzew z cechami NDVI i DEM), kompensacja reszt Gaussa i przywrócenie temperatury fizycznej.")
+    add_md("""## MODUŁ 2: Korejestracja AROSICS i Downscaling Termiczny pyDMS (`step_02_align_and_scale.py`)
+Subpikselowa korejestracja korelacji fazowej, korekta adiabatyczna do poziomu morza ($LST + 0.006 \cdot DEM$), deagregacja pyDMS (bagging drzew z cechami NDVI i DEM), kompensacja reszt Gaussa i przywrócenie temperatury fizycznej.""")
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
 from step_02_align_and_scale import align_and_scale_lst
@@ -283,7 +287,8 @@ plt.show()
 """)
 
     # 9. Moduł 3: Super-Resolution SEN2SR & ATPRK
-    add_md("## 🔍 MODUŁ 3: Super-Rozdzielczość SEN2SR i Fuzja ATPRK do Siatki 2.5 m (`step_03_super_resolve.py`)\nPodniesienie rozdzielczości pasm RGBN (B02, B03, B04, B08) $4\\times$ do 2.5 m/px za pomocą modelu Deep Learning SEN2SR (GPU T4) oraz geostatystyczna fuzja ATPRK z funkcją PSF i konserwacją energii dla kanałów 20m, LST oraz fenologii PPI.")
+    add_md("""## MODUŁ 3: Super-Rozdzielczość SEN2SR i Fuzja ATPRK do Siatki 2.5 m (`step_03_super_resolve.py`)
+Podniesienie rozdzielczości pasm RGBN (B02, B03, B04, B08) 4x do 2.5 m/px za pomocą modelu Deep Learning SEN2SR (GPU T4) oraz geostatystyczna fuzja ATPRK z funkcją PSF i konserwacją energii dla kanałów 20m, LST oraz fenologii PPI.""")
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
 from step_03_super_resolve import super_resolve_bands
@@ -294,14 +299,15 @@ bands_25m, profile_25m = super_resolve_bands(
     profile_10m=profile_10m
 )
 
-print('✅ KROK 3 ZAKOŃCZONY POMYŚLNIE:')
+print('[OK] KROK 3 ZAKOŃCZONY POMYŚLNIE:')
 print(f' - Nowy rozmiar siatki 2.5m: {bands_25m[\"B04\"].shape}')
 print(f' - Transformacja afiniczna piksela: {profile_25m[\"transform\"].a} m')
 print(f' - Wygenerowane warstwy 2.5m: {list(bands_25m.keys())}')
 """)
 
     # 10. Moduł 4: Wskaźniki, Z-score i Protokół Walda
-    add_md("## 📊 MODUŁ 4: Wskaźniki Biofizyczne, TVDI, Alerty Z-score i Protokół Walda (`step_04_metrics_alert.py`)\nObliczenie OSAVI, TCARI, TCARI/OSAVI na siatce 2.5 m, wskaźnika suszy TVDI (trójkąt LST-NDVI), aplikacji maski upraw trwałych $M_{crop}$ (sady/winnice), walidacji z regionalnym SWI $T=5$, klasyfikacji alertów Z-score oraz testu dokładności Walda.")
+    add_md("""## MODUŁ 4: Wskaźniki Biofizyczne, TVDI, Alerty Z-score i Protokół Walda (`step_04_metrics_alert.py`)
+Obliczenie OSAVI, TCARI, TCARI/OSAVI na siatce 2.5 m, wskaźnika suszy TVDI (trójkąt LST-NDVI), aplikacji maski upraw trwałych $M_{crop}$ (sady/winnice), walidacji z regionalnym SWI $T=5$, klasyfikacji alertów Z-score oraz testu dokładności Walda.""")
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
 from step_04_metrics_alert import compute_metrics_and_alerts
@@ -313,7 +319,7 @@ products, wald_metrics = compute_metrics_and_alerts(
     profile_25m=profile_25m
 )
 
-print('✅ Wyniki Walidacji Dokładności (Protokół Walda):')
+print('[OK] Wyniki Walidacji Dokładności (Protokół Walda):')
 for k, v in wald_metrics.items():
     print(f'  - {k.upper()}: {v:.4f}')
 
@@ -336,7 +342,8 @@ plt.show()
 """)
 
     # 11. Moduł 5: Master Orchestrator i Eksport COG GeoTIFF
-    add_md("## 🚀 MODUŁ 5: Master Orchestrator i Eksport Cloud-Optimized GeoTIFF (`step_05_colab_run.py`)\nUruchomienie kompletnego potoku z profilowaniem czasu, zapis kafelkowanych rastrów COG GeoTIFF z kompresją LZW na Dysku Google oraz wygenerowanie oficjalnego raportu walidacyjnego Markdown.")
+    add_md("""## MODUŁ 5: Master Orchestrator i Eksport Cloud-Optimized GeoTIFF (`step_05_colab_run.py`)
+Uruchomienie kompletnego potoku z profilowaniem czasu, zapis kafelkowanych rastrów COG GeoTIFF z kompresją LZW na Dysku Google oraz wygenerowanie oficjalnego raportu walidacyjnego Markdown.""")
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
 from step_05_colab_run import run_pipeline
@@ -352,7 +359,8 @@ if os.path.exists(report_path):
 """)
 
     # 12. Interaktywna Prezentacja Geoprzestrzenna w Geemap
-    add_md("## 🗺️ Krok 6: Interaktywna Wizualizacja Geoprzestrzenna Wyników w Colab\nPrezentacja zaostrzonych warstw LST, TCARI/OSAVI, TVDI oraz macierzy alertów na interaktywnym podkładzie satelitarnym z nałożeniem wektorowych granic działek.")
+    add_md("""## Krok 6: Interaktywna Wizualizacja Geoprzestrzenna Wyników w Colab
+Prezentacja zaostrzonych warstw LST, TCARI/OSAVI, TVDI oraz macierzy alertów na interaktywnym podkładzie satelitarnym z nałożeniem wektorowych granic działek.""")
 
     add_code("""# Interaktywna mapa podsumowująca
 m_results = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=15)
@@ -361,7 +369,7 @@ m_results.add_basemap('HYBRID')
 # Nałożenie granic działek referencyjnych
 m_results.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom (Wektor)')
 
-print('Interaktywna mapa wyników gotowa do eksploracji:')
+print('[INFO] Interaktywna mapa wyników gotowa do eksploracji:')
 m_results
 """)
 

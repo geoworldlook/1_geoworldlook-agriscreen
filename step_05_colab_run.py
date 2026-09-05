@@ -163,9 +163,9 @@ Walidacja przeprowadzona na kanale Sentinel-2 B04 (degradacja filtrem Gaussa $\s
 
 | Metryka Walidacyjna | Wartość Uzyskana | Próg Oczekiwany | Status |
 | :--- | :---: | :---: | :---: |
-| **RMSE (Root Mean Square Error)** | **{wald_metrics.get('rmse', 0.0):.4f}** | $< 0.0300$ | {' PASSED' if wald_metrics.get('rmse', 1.0) < 0.03 else '⚠️ ACCEPTABLE'} |
-| **SAM (Spectral Angle Mapper)** | **{wald_metrics.get('sam_degrees', 0.0):.2f}°** | $< 12.0°$ | {' PASSED' if wald_metrics.get('sam_degrees', 99.0) < 12.0 else '⚠️ ACCEPTABLE'} |
-| **SSIM (Structural Similarity Index)** | **{wald_metrics.get('ssim', 0.0):.4f}** | $> 0.7000$ | {' PASSED' if wald_metrics.get('ssim', 0.0) > 0.70 else '⚠️ ACCEPTABLE'} |
+| **RMSE (Root Mean Square Error)** | **{wald_metrics.get('rmse', 0.0):.4f}** | $< 0.0300$ | {'PASSED' if wald_metrics.get('rmse', 1.0) < 0.03 else 'ACCEPTABLE'} |
+| **SAM (Spectral Angle Mapper)** | **{wald_metrics.get('sam_degrees', 0.0):.2f}°** | $< 12.0°$ | {'PASSED' if wald_metrics.get('sam_degrees', 99.0) < 12.0 else 'ACCEPTABLE'} |
+| **SSIM (Structural Similarity Index)** | **{wald_metrics.get('ssim', 0.0):.4f}** | $> 0.7000$ | {'PASSED' if wald_metrics.get('ssim', 0.0) > 0.70 else 'ACCEPTABLE'} |
 
 ---
 

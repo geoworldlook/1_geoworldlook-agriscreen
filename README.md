@@ -11,7 +11,7 @@ System analizuje rzeczywiste dane satelitarne dla upraw wieloletnich (sady owoco
 
 ---
 
-## 🏗️ Architektura Modułowa i Struktura Projektu
+## Architektura Modułowa i Struktura Projektu
 
 Struktura katalogów została zaprojektowana zgodnie z wymogiem płaskiej struktury Colab (`/content/`) oraz dedykowanej hierarchii danych:
 
@@ -41,7 +41,7 @@ Struktura katalogów została zaprojektowana zgodnie z wymogiem płaskiej strukt
 
 ---
 
-## ⚙️ Wymagania i Zależności
+## Wymagania i Zależności
 
 W środowisku Google Colab instalacja pakietów odbywa się poleceniem:
 ```bash
@@ -50,7 +50,7 @@ pip install -q earthengine-api geemap geedim rasterio geopandas scikit-image sci
 
 ---
 
-## 🔬 Specyfikacja Algorytmiczna
+## Specyfikacja Algorytmiczna
 
 ### 1. Ingestia i Baza Historyczna GEE (`step_01_ingest.py`)
 - **Sentinel-2 L2A BOA:** Pasma `B02, B03, B04, B05, B06, B07, B08, B8A, B11, B12`.
@@ -102,7 +102,7 @@ pip install -q earthengine-api geemap geedim rasterio geopandas scikit-image sci
 
 ---
 
-## 🚀 Uruchomienie w Google Colab
+## Uruchomienie w Google Colab
 
 1. Umieść folder projektu w środowisku Colab lub na Dysku Google.
 2. Otwórz notatnik [`notebooks/AgriScreen_Colab_Pipeline.ipynb`](file:///c:/Users/dawids/OneDrive%20-%20opegieka.pl/Pulpit/OneDrive%20-%20opegieka.pl/Pulpit/DAWID/GEOWORLDLOOK/2_geoworldlook/notebooks/AgriScreen_Colab_Pipeline.ipynb).

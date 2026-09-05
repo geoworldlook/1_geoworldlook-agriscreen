@@ -377,7 +377,7 @@ def compute_metrics_and_alerts(
         mean_swi = float(np.nanmean(swi_1km))
         logger.info(f"Regionalne tło makrohydrologiczne (CGLS SWI T=5): średnia wilgotność {mean_swi:.1f}%")
         if mean_swi < 30.0:
-            logger.warning("⚠️ ALARM REGIONALNY: Silny deficyt wilgoci w strefie korzeniowej drzew (SWI T=5 < 30%)!")
+            logger.warning("ALARM REGIONALNY: Silny deficyt wilgoci w strefie korzeniowej drzew (SWI T=5 < 30%)!")
 
     # 7. Protokół Walda (walidacja kanału B04)
     wald_metrics = run_wald_protocol_validation(b04_10m, sigma_blur=1.5, decimation_factor=4)

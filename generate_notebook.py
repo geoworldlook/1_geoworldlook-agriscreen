@@ -31,13 +31,13 @@ def add_code(source):
         'source': [line + '\n' for line in source.strip().split('\n')]
     })
 
-add_md("""# 🛰️ S-3/S-2 AgriScreen DSS v2.5
+add_md("""#  S-3/S-2 AgriScreen DSS v2.5
 ### System Wczesnego Wykrywania Anomalii Wilgotnościowych i Fizjologicznych w Uprawach Wieloletnich
 **Środowisko:** Google Colab (GPU T4, 12 GB RAM) | Google Earth Engine (GEE)  
 **Dane wejściowe:** Rzeczywiste dane satelitarne Sentinel-2, Sentinel-3 / LST 1km, Copernicus DEM GLO-30, CLMS  
 **Obszar testowy:** GBOV Condom (`data/1_AOI_GBOV_CONDOM.geojson`)""")
 
-add_md("## 📦 Krok 0: Instalacja Wymaganych Zależności w Google Colab")
+add_md("##  Krok 0: Instalacja Wymaganych Zależności w Google Colab")
 
 add_code("""# Instalacja pakietów geoprzestrzennych i uczenia maszynowego
 !pip install -q earthengine-api geemap geedim rasterio geopandas scikit-image scikit-learn scipy affine
@@ -50,7 +50,7 @@ if torch.cuda.is_available():
     print(f'GPU: {torch.cuda.get_device_name(0)} (VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB)')
 """)
 
-add_md("## 📁 Krok 0.1: Montowanie Dysku Google (Opcjonalne)")
+add_md("##  Krok 0.1: Montowanie Dysku Google (Opcjonalne)")
 
 add_code("""import os
 # Jeśli pracujesz na Google Colab, możesz zamontować Dysk Google
@@ -58,13 +58,13 @@ try:
     from google.colab import drive
     drive.mount('/content/drive')
     BASE_DIR = '/content/drive/MyDrive/AgriScreen_Project'
-    print(f'✅ Zamontowano Google Drive: {BASE_DIR}')
+    print(f' Zamontowano Google Drive: {BASE_DIR}')
 except Exception:
     BASE_DIR = os.getcwd()
-    print(f'ℹ️ Uruchomienie lokalne/Colab bez montowania dysku: {BASE_DIR}')
+    print(f'ℹ Uruchomienie lokalne/Colab bez montowania dysku: {BASE_DIR}')
 """)
 
-add_md("## 🔑 Krok 0.2: Autoryzacja i Inicjalizacja Google Earth Engine (GEE)")
+add_md("##  Krok 0.2: Autoryzacja i Inicjalizacja Google Earth Engine (GEE)")
 
 add_code("""import ee
 import geemap
@@ -72,15 +72,15 @@ import geemap
 print('Inicjalizacja połączenia z Google Earth Engine...')
 try:
     ee.Initialize()
-    print('✅ Pomyślnie zainicjalizowano GEE!')
+    print(' Pomyślnie zainicjalizowano GEE!')
 except Exception:
     print('Wymagana autoryzacja GEE. Postępuj zgodnie z instrukcjami na ekranie...')
     ee.Authenticate()
     ee.Initialize() # Jeśli posiadasz projekt, podaj: ee.Initialize(project='twoj-projekt')
-    print('✅ Pomyślnie uwierzytelniono GEE!')
+    print(' Pomyślnie uwierzytelniono GEE!')
 """)
 
-add_md("## 🗺️ Krok 0.3: Konfiguracja Parametrów i Wizualizacja Poligonu AOI")
+add_md("##  Krok 0.3: Konfiguracja Parametrów i Wizualizacja Poligonu AOI")
 
 add_code("""import json
 import geopandas as gpd
@@ -107,7 +107,7 @@ m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom')
 m
 """)
 
-add_md("## 🛰️ MODUŁ 1: Ingestia Danych Satelitarnych GEE i Bazy Referencyjnej (`step_01_ingest.py`)")
+add_md("##  MODUŁ 1: Ingestia Danych Satelitarnych GEE i Bazy Referencyjnej (`step_01_ingest.py`)")
 
 add_code("""from step_01_ingest import ingest_satellite_data
 
@@ -129,7 +129,7 @@ s2_bands, profile_10m, baseline_stats = ingest_satellite_data(
     download_historical_series=CONFIG['DOWNLOAD_HISTORICAL']
 )
 
-print('✅ Pomyślnie pobrano dane wejściowe!')
+print(' Pomyślnie pobrano dane wejściowe!')
 print(f' - Pasm S2: {list(s2_bands.keys())}')
 print(f' - Maska HRL M_crop: {s2_bands[\"crop_mask\"].shape}')
 print(f' - Regionalny SWI T=5: {s2_bands[\"swi_1km\"].shape}')
@@ -137,7 +137,7 @@ print(f' - Fenologia HR-VPP PPI: {s2_bands[\"ppi_10m\"].shape}')
 print(f' - Profil CRS: {profile_10m[\"crs\"]}')
 """)
 
-add_md("## 🌡️ MODUŁ 2: Korejestracja AROSICS i Downscaling Termiczny pyDMS (`step_02_align_and_scale.py`)")
+add_md("##  MODUŁ 2: Korejestracja AROSICS i Downscaling Termiczny pyDMS (`step_02_align_and_scale.py`)")
 
 add_code("""from step_02_align_and_scale import align_and_scale_lst
 import matplotlib.pyplot as plt
@@ -163,7 +163,7 @@ plt.tight_layout()
 plt.show()
 """)
 
-add_md("## 🔍 MODUŁ 3: Super-Rozdzielczość SEN2SR i Fuzja ATPRK do Siatki 2.5 m (`step_03_super_resolve.py`)")
+add_md("##  MODUŁ 3: Super-Rozdzielczość SEN2SR i Fuzja ATPRK do Siatki 2.5 m (`step_03_super_resolve.py`)")
 
 add_code("""from step_03_super_resolve import super_resolve_bands
 
@@ -174,12 +174,12 @@ bands_25m, profile_25m = super_resolve_bands(
     profile_10m=profile_10m
 )
 
-print('✅ Fuzja ATPRK zakończona!')
+print(' Fuzja ATPRK zakończona!')
 print(f' - Nowa siatka afiniczna: piksel {profile_25m[\"transform\"].a} m')
 print(f' - Rozmiar siatki 2.5m: {bands_25m[\"B04\"].shape}')
 """)
 
-add_md("## 📊 MODUŁ 4: Wskaźniki Biofizyczne, TVDI, Alerty Z-score i Protokół Walda (`step_04_metrics_alert.py`)")
+add_md("##  MODUŁ 4: Wskaźniki Biofizyczne, TVDI, Alerty Z-score i Protokół Walda (`step_04_metrics_alert.py`)")
 
 add_code("""from step_04_metrics_alert import compute_metrics_and_alerts
 
@@ -191,7 +191,7 @@ products, wald_metrics = compute_metrics_and_alerts(
     profile_25m=profile_25m
 )
 
-print('✅ Metryki Protokołu Walda:')
+print(' Metryki Protokołu Walda:')
 for k, v in wald_metrics.items():
     print(f'  - {k.upper()}: {v:.4f}')
 
@@ -213,7 +213,7 @@ plt.tight_layout()
 plt.show()
 """)
 
-add_md("## 🚀 MODUŁ 5: Master Orchestrator i Eksport Cloud-Optimized GeoTIFF (`step_05_colab_run.py`)")
+add_md("##  MODUŁ 5: Master Orchestrator i Eksport Cloud-Optimized GeoTIFF (`step_05_colab_run.py`)")
 
 add_code("""from step_05_colab_run import run_pipeline
 
