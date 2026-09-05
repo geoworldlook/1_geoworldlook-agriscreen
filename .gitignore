@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Dane rastrowe i tymczasowe (przechowywane na Dysku Google, nie w repo)
+data/01_Raw_Sentinel2/*
+!data/01_Raw_Sentinel2/.gitkeep
+data/02_Raw_Thermal_LST/*
+!data/02_Raw_Thermal_LST/.gitkeep
+data/03_Copernicus_Auxiliary/*
+!data/03_Copernicus_Auxiliary/.gitkeep
+data/04_Processed_Intermediates/*
+!data/04_Processed_Intermediates/.gitkeep
+data/05_Final_Outputs/*
+!data/05_Final_Outputs/.gitkeep
+
+# Rozszerzenia plików ciężkich
+*.tif
+*.tiff
+*.nc
+*.h5
+*.tar
+*.tar.gz
+*.zip
+
+# Środowisko i klucze
+.env
+*.token
+credentials.json
+
+# IDE / System
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
