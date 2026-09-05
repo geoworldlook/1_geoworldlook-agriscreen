@@ -72,11 +72,12 @@ EPSILON = 1e-6
 
 def load_aoi_geometry(
     geojson_path: str,
-    buffer_m: int = 1000
+    buffer_m: int = 0
 ) -> Tuple[ee.Geometry, Dict[str, float], int]:
     """
     Wczytuje wektor AOI z pliku GeoJSON, wyznacza obwiednię, punkt centralny,
     odpowiednią strefę UTM (EPSG) oraz zwraca geometrię Earth Engine.
+    Obsługuje zarówno pojedynczy zasięg bufora (MultiPolygon), jak i kolekcję działek.
     """
     if not os.path.exists(geojson_path):
         raise FileNotFoundError(f"Nie znaleziono pliku AOI: {geojson_path}")
@@ -88,41 +89,33 @@ def load_aoi_geometry(
     if not features:
         raise ValueError(f"Plik GeoJSON {geojson_path} nie zawiera obiektów 'features'.")
 
-    all_lons: List[float] = []
-    all_lats: List[float] = []
-    ee_polygons = []
+    # Bezpośrednie wczytanie geometrii do Earth Engine
+    try:
+        ee_fc = ee.FeatureCollection(data)
+        combined_geom = ee_fc.geometry()
+        if buffer_m > 0:
+            combined_geom = combined_geom.buffer(buffer_m)
+    except Exception as ee_err:
+        logger.warning(f"FeatureCollection fallback: {ee_err}. Konstruowanie geometrii z elementów.")
+        geoms = [ee.Geometry(feat["geometry"]) for feat in features if "geometry" in feat]
+        combined_geom = ee.Geometry.MultiPolygon([g.coordinates() for g in geoms]) if len(geoms) > 1 else geoms[0]
+        if buffer_m > 0:
+            combined_geom = combined_geom.buffer(buffer_m)
 
-    for feat in features:
-        geom = feat.get("geometry", {})
-        coords = geom.get("coordinates", [])
-        geom_type = geom.get("type", "")
+    # Wyznaczenie współrzędnych obwiedni w WGS84
+    bounds_info = combined_geom.bounds().getInfo()
+    coords = bounds_info["coordinates"][0]
+    lons = [pt[0] for pt in coords]
+    lats = [pt[1] for pt in coords]
 
-        if geom_type == "Polygon":
-            poly_coords = coords[0]  # zewnętrzny pierścień
-            for pt in poly_coords:
-                all_lons.append(pt[0])
-                all_lats.append(pt[1])
-            ee_polygons.append(ee.Geometry.Polygon(coords))
-        elif geom_type == "MultiPolygon":
-            for poly in coords:
-                for pt in poly[0]:
-                    all_lons.append(pt[0])
-                    all_lats.append(pt[1])
-            ee_polygons.append(ee.Geometry.MultiPolygon(coords))
-
-    min_lon, max_lon = min(all_lons), max(all_lons)
-    min_lat, max_lat = min(all_lats), max(all_lats)
+    min_lon, max_lon = min(lons), max(lons)
+    min_lat, max_lat = min(lats), max(lats)
     center_lon = (min_lon + max_lon) / 2.0
     center_lat = (min_lat + max_lat) / 2.0
 
     # Wyznaczenie strefy UTM (WGS84 UTM Zone)
     utm_zone = int((center_lon + 180) // 6) + 1
     epsg_code = 32600 + utm_zone if center_lat >= 0 else 32700 + utm_zone
-
-    # Złożona geometria EE i bufor
-    combined_geom = ee.Geometry.MultiPolygon([
-        poly.coordinates() for poly in ee_polygons
-    ]).buffer(buffer_m)
 
     bbox_dict = {
         "min_lon": min_lon, "min_lat": min_lat,
@@ -131,8 +124,8 @@ def load_aoi_geometry(
     }
 
     logger.info(
-        f"Wczytano AOI: {len(features)} działek. Środek: ({center_lat:.4f}, {center_lon:.4f}). "
-        f"Docelowy układ UTM: EPSG:{epsg_code}, bufor: {buffer_m}m"
+        f"Wczytano AOI: {len(features)} obiektów z {os.path.basename(geojson_path)}. "
+        f"Środek: ({center_lat:.4f}, {center_lon:.4f}). Docelowy układ UTM: EPSG:{epsg_code}, bufor: {buffer_m}m"
     )
     return combined_geom, bbox_dict, epsg_code
 
@@ -169,11 +162,13 @@ def get_s2_sr_cld_collection(
     aoi: ee.Geometry,
     start_date: str,
     end_date: str,
-    cloud_thresh: int = 60
+    cloud_thresh: int = 90
 ) -> ee.ImageCollection:
     """
     Buduje kolekcję Sentinel-2 L2A (SR Harmonized) złączoną z kolekcją prawdopodobieństwa
     chmur s2cloudless (COPERNICUS/S2_CLOUD_PROBABILITY).
+    Oblicza średnie zachmurzenie s2cloudless wyłącznie nad obwiednią działek AOI
+    i przypisuje je do właściwości 'AOI_CLOUD_PERCENTAGE'.
     """
     s2_sr_col = (
         ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
@@ -188,7 +183,7 @@ def get_s2_sr_cld_collection(
         .filterDate(start_date, end_date)
     )
 
-    return ee.ImageCollection(
+    joined = ee.ImageCollection(
         ee.Join.saveFirst('s2cloudless').apply(
             primary=s2_sr_col,
             secondary=s2_cloudless_col,
@@ -198,6 +193,20 @@ def get_s2_sr_cld_collection(
             )
         )
     )
+
+    def compute_aoi_cloud(img: ee.Image) -> ee.Image:
+        cld = ee.Image(img.get('s2cloudless'))
+        cld_prob = cld.select('probability')
+        stats = cld_prob.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=aoi,
+            scale=20,
+            maxPixels=1e6
+        )
+        val = ee.Algorithms.If(stats.contains('probability'), stats.get('probability'), 100.0)
+        return img.set('AOI_CLOUD_PERCENTAGE', val)
+
+    return joined.map(compute_aoi_cloud)
 
 
 def add_cloud_and_shadow_mask(img: ee.Image) -> ee.Image:
@@ -698,12 +707,13 @@ def sync_sentinel2_time_series(
 
     logger.info(f"--- SYNCHRONIZACJA PRZYROSTOWA S2: {start_date} do {end_date} (AOI Condom) ---")
 
-    # Pobranie kolekcji S2 złączonej z s2cloudless
-    s2_col = get_s2_sr_cld_collection(aoi, start_date, end_date, cloud_thresh=cloud_thresh)
+    # Pobranie kolekcji S2 złączonej z s2cloudless z zachmurzeniem liczonym ściśle nad działkami
+    s2_col = get_s2_sr_cld_collection(aoi, start_date, end_date, cloud_thresh=90)
+    s2_col_clear = s2_col.filter(ee.Filter.lte('AOI_CLOUD_PERCENTAGE', cloud_thresh))
 
     # Pobranie listy metadanych scen
-    scenes_info = s2_col.sort('system:time_start', True).getInfo().get('features', [])
-    logger.info(f"Znaleziono {len(scenes_info)} scen spełniających kryteria chmurowości w GEE.")
+    scenes_info = s2_col_clear.sort('system:time_start', True).getInfo().get('features', [])
+    logger.info(f"Znaleziono {len(scenes_info)} scen spełniających kryterium bezchmurności nad działkami (<= {cloud_thresh}%).")
 
     new_downloads = 0
     scenes_summary: List[Dict[str, Any]] = []
@@ -858,13 +868,17 @@ def ingest_satellite_data(
         if s2_col.size().getInfo() == 0:
             raise RuntimeError(f"Nie znaleziono żadnej sceny Sentinel-2 dla obszaru w oknie {s2_start} do {s2_end}.")
 
-    # Wybór sceny o najmniejszym zachmurzeniu
-    best_s2 = s2_col.sort('CLOUDY_PIXEL_PERCENTAGE').first()
+    # Wybór sceny o najmniejszym zachmurzeniu DOKŁADNIE NAD NASZYMI DZIAŁKAMI (AOI)
+    best_s2 = s2_col.sort('AOI_CLOUD_PERCENTAGE').first()
     best_id = best_s2.get('system:index').getInfo()
     cloud_pct = best_s2.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
+    aoi_cloud = best_s2.get('AOI_CLOUD_PERCENTAGE').getInfo()
     time_start_ms = best_s2.get('system:time_start').getInfo()
     actual_date_str = datetime.utcfromtimestamp(time_start_ms / 1000.0).strftime('%Y-%m-%d')
-    logger.info(f"Wybrano scenę S2: {best_id} (data akwizycji: {actual_date_str}, zachmurzenie: {cloud_pct:.1f}%)")
+    logger.info(
+        f"Wybrano scenę S2: {best_id} (data akwizycji: {actual_date_str}, "
+        f"zachmurzenie nad działkami AOI: {aoi_cloud:.1f}%, cała scena: {cloud_pct:.1f}%)"
+    )
 
     # Przygotowanie obrazu S2 ze skalowaniem BOA -> [0.0, 1.0]
     s2_processed = prepare_s2_scaled_image(best_s2)

@@ -209,17 +209,19 @@ CONFIG = {
     'LAT': 43.9752,
     'LON': 0.3376,
     'TARGET_DATE': '2023-07-15',
-    'BUFFER_M': 2000,
+    'BUFFER_M': 0,  # 0, ponieważ plik ZASIEG zawiera już zoptymalizowany bufor poligonu
     'BASELINE_YEARS': (2018, 2025),
     'GEE_PROJECT': 'ee-geoworldlook',
-    'GEOJSON_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM.geojson'),
+    'GEOJSON_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM_ZASIEG.geojson'),
+    'PARCELS_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM.geojson'),
     'OUTPUT_DIR': os.path.join(PROJECT_DIR, 'data', '05_Final_Outputs'),
-    'DOWNLOAD_HISTORICAL': False  # Ustaw True, aby pobrać pełną serię przyrostową od 2016
+    'DOWNLOAD_HISTORICAL': True  # Pobieranie wszystkich dostępnych scen S2 od 2016 do dziś
 }
 
-gdf = gpd.read_file(CONFIG['GEOJSON_PATH'])
-print(f'Wczytano {len(gdf)} działek referencyjnych w rejonie Condom (Francja).')
-display(gdf[['fid', 'Typ', 'geometry']].head(5))
+gdf_zasieg = gpd.read_file(CONFIG['GEOJSON_PATH'])
+gdf_parcels = gpd.read_file(CONFIG['PARCELS_PATH'])
+print(f'Wczytano bufor zasięgu obliczeniowego oraz {len(gdf_parcels)} działek referencyjnych.')
+display(gdf_parcels[['fid', 'Typ', 'geometry']].head(5))
 
 # Zabezpieczenie przed Timeoutem na kluczu GOOGLE_MAPS_API_KEY w Google Colab
 try:
@@ -238,12 +240,14 @@ try:
     import geemap.foliumap as geemap
     m = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=14)
     m.add_basemap('HYBRID')
-    m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom')
+    m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Zasieg Bufora AOI')
+    m.add_geojson(CONFIG['PARCELS_PATH'], layer_name='Działki GBOV (Sady i Winnice)')
 except Exception:
     import geemap
     m = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=14)
     m.add_basemap('HYBRID')
-    m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom')
+    m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Zasieg Bufora AOI')
+    m.add_geojson(CONFIG['PARCELS_PATH'], layer_name='Działki GBOV (Sady i Winnice)')
 m
 """)
 
