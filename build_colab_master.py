@@ -93,7 +93,15 @@ if PROJECT_DIR not in sys.path:
 %load_ext autoreload
 %autoreload 2
 
-# 5. Utworzenie wymaganej struktury katalogów na dane (jeśli jeszcze nie istnieją)
+# 5. Opcjonalne pobranie najnowszych zmian z GitHub na Dysk Google
+if os.path.exists(os.path.join(PROJECT_DIR, '.git')):
+    print('🔄 Wykryto repozytorium Git. Pobieranie najnowszych aktualizacji ze skryptów...')
+    !git -C "{PROJECT_DIR}" pull
+else:
+    print('ℹ️ Jeśli chcesz automatycznie klonować/aktualizować projekt z Git, sklonuj repo poleceniem:')
+    print('   !git clone https://github.com/<USER>/<REPO>.git ' + PROJECT_DIR)
+
+# 6. Utworzenie wymaganej struktury katalogów na dane (jeśli jeszcze nie istnieją)
 dirs = [
     'data/00_Metadata',
     'data/01_Raw_Sentinel2',
@@ -105,7 +113,7 @@ dirs = [
 for d in dirs:
     os.makedirs(os.path.join(PROJECT_DIR, d), exist_ok=True)
 
-# 6. Weryfikacja obecności modułów na Dysku Google
+# 7. Weryfikacja obecności modułów na Dysku Google
 expected_files = [
     'step_01_ingest.py',
     'step_02_align_and_scale.py',
@@ -122,6 +130,11 @@ if missing:
     print('Upewnij się, że zmienna PROJECT_DIR wskazuje na właściwy folder z wgranym projektem.')
 else:
     print('✅ Wszystkie moduły potoku i pliki konfiguracyjne są obecne i gotowe do importu!')
+""")
+
+    # 2b. Opcjonalna komórka do szybkiej synchronizacji Git
+    add_md("### 🔄 Szybka synchronizacja zmian z GitHub (`git pull`)\nUruchom tę komórkę w dowolnym momencie, gdy wprowadzimy zmiany w plikach `.py` i wyślemy je na GitHub:")
+    add_code("""!git -C "{PROJECT_DIR}" pull
 """)
 
     # 3. Weryfikacja GPU T4
