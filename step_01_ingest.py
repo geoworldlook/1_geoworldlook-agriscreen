@@ -489,6 +489,10 @@ def fetch_cdse_swi_multidepth(
     dla wszystkich 8 poziomow glebokosci: T=2, 5, 10, 15, 20, 40, 60, 100.
     Zapisuje 8-kanalowy GeoTIFF dopasowany bezposrednio do siatki UTM 31N profilu 10m.
     """
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+        logger.info(f"Plik CGLS SWI juz istnieje na dysku: {os.path.basename(output_path)} (pomijanie pobierania CDSE).")
+        return output_path
+
     c_id, c_sec = get_cdse_credentials(client_id, client_secret)
     if not c_id or not c_sec:
         raise ValueError(
@@ -601,6 +605,10 @@ def fetch_cdse_hrvpp_st(
     z Copernicus CDSE. Zawiera 10-dniowa zrekonstruowana serie wskaznika PPI
     oraz flage jakosci dopasowania QFLAG.
     """
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+        logger.info(f"Plik CLMS HR-VPP juz istnieje na dysku: {os.path.basename(output_path)} (pomijanie pobierania CDSE).")
+        return output_path
+
     c_id, c_sec = get_cdse_credentials(client_id, client_secret)
     if not c_id or not c_sec:
         raise ValueError(
