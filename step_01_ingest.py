@@ -137,27 +137,25 @@ def load_aoi_geometry(
     return combined_geom, bbox_dict, epsg_code
 
 
-def initialize_earth_engine(project_id: Optional[str] = None) -> None:
+def initialize_earth_engine(project_id: Optional[str] = "ee-geoworldlook") -> None:
     """
-    Inicjalizuje połączenie z Google Earth Engine z automatyczną obsługą uwierzytelnienia.
+    Inicjalizuje połączenie z Google Earth Engine z automatyczną obsługą uwierzytelnienia i projektu.
     """
     if ee is None:
         raise ImportError("Biblioteka 'earthengine-api' nie jest zainstalowana. Uruchom: pip install earthengine-api geemap")
+    
+    if not project_id:
+        project_id = os.environ.get("EE_PROJECT", "ee-geoworldlook")
+
     try:
-        if project_id:
-            ee.Initialize(project=project_id)
-        else:
-            ee.Initialize()
-        logger.info("Pomyślnie zainicjalizowano Google Earth Engine.")
+        ee.Initialize(project=project_id)
+        logger.info(f"Pomyślnie zainicjalizowano Google Earth Engine (projekt: {project_id}).")
     except Exception as e:
-        logger.warning(f"Inicjalizacja standardowa GEE nie powiodła się: {e}. Uruchamianie procedury autoryzacji...")
+        logger.warning(f"Inicjalizacja GEE z projektem {project_id} wymaga autoryzacji ({e}). Uruchamianie procedury autoryzacji...")
         try:
             ee.Authenticate()
-            if project_id:
-                ee.Initialize(project=project_id)
-            else:
-                ee.Initialize()
-            logger.info("Pomyślnie uwierzytelniono i zainicjalizowano GEE.")
+            ee.Initialize(project=project_id)
+            logger.info(f"Pomyślnie uwierzytelniono i zainicjalizowano GEE (projekt: {project_id}).")
         except Exception as auth_err:
             logger.error(f"Krytyczny błąd autoryzacji Google Earth Engine: {auth_err}")
             raise
@@ -781,7 +779,8 @@ def ingest_satellite_data(
     baseline_years: Tuple[int, int] = (2018, 2025),
     geojson_path: Optional[str] = "data/1_AOI_GBOV_CONDOM.geojson",
     output_base_dir: str = "data",
-    download_historical_series: bool = False
+    download_historical_series: bool = False,
+    gee_project: str = "ee-geoworldlook"
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any], Dict[str, np.ndarray]]:
     """
     GŁÓWNA FUNKCJA WEJŚCIOWA DLA KROKU 1 (Rygorystyczny kontrakt interfejsu).
@@ -797,6 +796,7 @@ def ingest_satellite_data(
         geojson_path: Ścieżka do pliku wektorowego działek (AOI).
         output_base_dir: Główny katalog zapisu danych.
         download_historical_series: Czy uruchomić pełne przyrostowe pobieranie wszystkich scen od 2016.
+        gee_project: Identyfikator projektu Google Cloud dla Earth Engine.
 
     Zwraca:
         s2_bands_dict: Słownik zawierający macierze NumPy float32 dla pasm Sentinel-2
@@ -810,7 +810,7 @@ def ingest_satellite_data(
     logger.info("================================================================================")
 
     # 1. Inicjalizacja GEE
-    initialize_earth_engine()
+    initialize_earth_engine(project_id=gee_project)
 
     # 2. Definicja geometrii AOI i CRS
     if geojson_path and os.path.exists(geojson_path):

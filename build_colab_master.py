@@ -188,23 +188,16 @@ print('[OK] Pakiety teledetekcyjne zostały pomyślnie zweryfikowane i zainstalo
     add_code("""import ee
 import geemap
 
-print('Inicjalizacja Google Earth Engine...')
+PROJECT_ID = 'ee-geoworldlook'
+print(f'Inicjalizacja Google Earth Engine z projektem: {PROJECT_ID}...')
 try:
-    ee.Initialize()
-    print('[OK] Google Earth Engine jest już zainicjalizowany!')
+    ee.Initialize(project=PROJECT_ID)
+    print(f'[OK] Google Earth Engine zainicjalizowany pomyślnie z projektem: {PROJECT_ID}')
 except Exception as e:
     print('Wymagana autoryzacja GEE. Postępuj zgodnie z instrukcją na ekranie:')
     ee.Authenticate()
-    try:
-        ee.Initialize()
-    except Exception as init_err:
-        print('Wskazówka: Nowe konta GEE wymagają wskazania powiązanego projektu Google Cloud.')
-        project_id = input('Podaj ID projektu Google Cloud dla Earth Engine (np. ee-twojanazwa lub wciśnij Enter aby pominąć): ').strip()
-        if project_id:
-            ee.Initialize(project=project_id)
-        else:
-            raise init_err
-    print('[OK] Pomyślnie uwierzytelniono GEE!')
+    ee.Initialize(project=PROJECT_ID)
+    print(f'[OK] Pomyślnie uwierzytelniono GEE z projektem: {PROJECT_ID}!')
 """)
 
     # 6. Konfiguracja i Podgląd AOI
@@ -218,6 +211,7 @@ CONFIG = {
     'TARGET_DATE': '2023-07-15',
     'BUFFER_M': 2000,
     'BASELINE_YEARS': (2018, 2025),
+    'GEE_PROJECT': 'ee-geoworldlook',
     'GEOJSON_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM.geojson'),
     'OUTPUT_DIR': os.path.join(PROJECT_DIR, 'data', '05_Final_Outputs'),
     'DOWNLOAD_HISTORICAL': False  # Ustaw True, aby pobrać pełną serię przyrostową od 2016
@@ -267,7 +261,8 @@ s2_bands, profile_10m, baseline_stats = ingest_satellite_data(
     buffer_m=CONFIG['BUFFER_M'],
     baseline_years=CONFIG['BASELINE_YEARS'],
     geojson_path=CONFIG['GEOJSON_PATH'],
-    download_historical_series=CONFIG['DOWNLOAD_HISTORICAL']
+    download_historical_series=CONFIG['DOWNLOAD_HISTORICAL'],
+    gee_project=CONFIG.get('GEE_PROJECT', 'ee-geoworldlook')
 )
 
 print('[OK] KROK 1 ZAKOŃCZONY POMYŚLNIE:')

@@ -54,6 +54,7 @@ CONFIG: Dict[str, Any] = {
     "TARGET_DATE": "2023-07-15",
     "BUFFER_M": 2000,
     "BASELINE_YEARS": (2018, 2025),
+    "GEE_PROJECT": "ee-geoworldlook",
     "GEOJSON_PATH": "data/1_AOI_GBOV_CONDOM.geojson",
     "OUTPUT_DIR": "data/05_Final_Outputs",
     "DOWNLOAD_HISTORICAL": False  # Czy wykonać przyrostowe pobieranie wszystkich scen od 2016
@@ -231,7 +232,8 @@ def run_pipeline(config: Dict[str, Any] = CONFIG) -> None:
             buffer_m=config["BUFFER_M"],
             baseline_years=config["BASELINE_YEARS"],
             geojson_path=config.get("GEOJSON_PATH"),
-            download_historical_series=config.get("DOWNLOAD_HISTORICAL", False)
+            download_historical_series=config.get("DOWNLOAD_HISTORICAL", False),
+            gee_project=config.get("GEE_PROJECT", "ee-geoworldlook")
         )
     except Exception as e:
         logger.error(f"Błąd wykonania Kroku 1 (Ingestia GEE): {e}")
