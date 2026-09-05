@@ -227,10 +227,29 @@ gdf = gpd.read_file(CONFIG['GEOJSON_PATH'])
 print(f'Wczytano {len(gdf)} działek referencyjnych w rejonie Condom (Francja).')
 display(gdf[['fid', 'Typ', 'geometry']].head(5))
 
-# Interaktywna mapa podglądowa Geemap
-m = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=14)
-m.add_basemap('HYBRID')
-m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom')
+# Zabezpieczenie przed Timeoutem na kluczu GOOGLE_MAPS_API_KEY w Google Colab
+try:
+    from google.colab import userdata
+    _orig_get = userdata.get
+    def _safe_get(k, *a, **kw):
+        if 'GOOGLE_MAPS' in k:
+            raise userdata.SecretNotFoundError(k)
+        return _orig_get(k, *a, **kw)
+    userdata.get = _safe_get
+except Exception:
+    pass
+
+# Interaktywna mapa podglądowa Geemap (backend foliumap zoptymalizowany pod Colab)
+try:
+    import geemap.foliumap as geemap
+    m = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=14)
+    m.add_basemap('HYBRID')
+    m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom')
+except Exception:
+    import geemap
+    m = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=14)
+    m.add_basemap('HYBRID')
+    m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom')
 m
 """)
 
@@ -365,11 +384,16 @@ if os.path.exists(report_path):
 Prezentacja zaostrzonych warstw LST, TCARI/OSAVI, TVDI oraz macierzy alertów na interaktywnym podkładzie satelitarnym z nałożeniem wektorowych granic działek.""")
 
     add_code("""# Interaktywna mapa podsumowująca
-m_results = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=15)
-m_results.add_basemap('HYBRID')
-
-# Nałożenie granic działek referencyjnych
-m_results.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom (Wektor)')
+try:
+    import geemap.foliumap as geemap
+    m_results = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=15)
+    m_results.add_basemap('HYBRID')
+    m_results.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom (Wektor)')
+except Exception:
+    import geemap
+    m_results = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=15)
+    m_results.add_basemap('HYBRID')
+    m_results.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Działki GBOV Condom (Wektor)')
 
 print('[INFO] Interaktywna mapa wyników gotowa do eksploracji:')
 m_results
