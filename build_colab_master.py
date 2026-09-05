@@ -156,17 +156,19 @@ for mod_name in ['step_01_ingest', 'step_02_align_and_scale', 'step_03_super_res
 print('[OK] Moduły potoku zsynchronizowane i przeładowane!')
 """)
 
-    # 3. Weryfikacja GPU T4
-    add_md("## Krok 2: Weryfikacja Akceleratora Graficznego (GPU T4)")
+    # 3. Weryfikacja GPU / CPU
+    add_md("## Krok 2: Weryfikacja Środowiska Obliczeniowego (GPU / CPU)")
 
-    add_code("""!nvidia-smi
-
-import torch
+    add_code("""import torch
+cuda_available = torch.cuda.is_available()
 print(f'PyTorch wersja: {torch.__version__}')
-print(f'Akcelerator CUDA dostępny: {torch.cuda.is_available()}')
-if torch.cuda.is_available():
-    print(f'Model GPU: {torch.cuda.get_device_name(0)}')
-    print(f'Dostępna pamięć VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+if cuda_available:
+    print(f'[INFO] Akcelerator GPU: {torch.cuda.get_device_name(0)}')
+    print(f'[INFO] Dostępna pamięć VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+    !nvidia-smi
+else:
+    print('[INFO] Tryb obliczeń: Standardowy CPU (Colab Free).')
+    print('[INFO] Potok AgriScreen DSS w pełni obsługuje CPU. Całkowity czas obliczeń będzie tylko nieznacznie dłuższy.')
 """)
 
     # 4. Instalacja Zależności
