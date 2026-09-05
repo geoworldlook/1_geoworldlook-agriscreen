@@ -94,9 +94,17 @@ os.chdir(PROJECT_DIR)
 if PROJECT_DIR not in sys.path:
     sys.path.insert(0, PROJECT_DIR)
 
-# 4. Włączenie automatycznego przeładowywania modułów Python (Zero długu technologicznego)
-%load_ext autoreload
-%autoreload 2
+# 4. Włączenie automatycznego przeładowywania modułów Python (kompatybilność z Python 3.10 - 3.13+)
+import importlib
+if 'imp' not in sys.modules:
+    sys.modules['imp'] = importlib
+
+try:
+    %load_ext autoreload
+    %autoreload 2
+    print('✅ Włączono automatyczne przeładowywanie modułów (%autoreload 2).')
+except Exception as e:
+    print(f'ℹ️ Informacja: autoreload pominięty ({e}).')
 
 # 5. Pobranie najnowszych zmian z GitHub na Dysk Google
 if os.path.exists(os.path.join(PROJECT_DIR, '.git')):
@@ -137,6 +145,13 @@ else:
     # 2b. Opcjonalna komórka do szybkiej synchronizacji Git
     add_md("### 🔄 Szybka synchronizacja zmian z GitHub (`git pull`)\nUruchom tę komórkę w dowolnym momencie, gdy wprowadzimy zmiany w plikach `.py` i wyślemy je na GitHub:")
     add_code("""!git -C "{PROJECT_DIR}" pull
+
+# Wymuszenie przeładowania modułów w pamięci jądra
+import importlib
+for mod_name in ['step_01_ingest', 'step_02_align_and_scale', 'step_03_super_resolve', 'step_04_metrics_alert', 'step_05_colab_run']:
+    if mod_name in sys.modules:
+        importlib.reload(sys.modules[mod_name])
+print('✅ Moduły potoku zsynchronizowane i przeładowane!')
 """)
 
     # 3. Weryfikacja GPU T4
