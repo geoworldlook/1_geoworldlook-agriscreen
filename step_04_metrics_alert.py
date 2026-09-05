@@ -371,13 +371,28 @@ def compute_metrics_and_alerts(
     else:
         ratio_masked_25m = ratio_25m
 
-    # 6. Weryfikacja Regionalnego Tła Wilgotnościowego (CGLS Soil Water Index T=5)
+    # 6. Weryfikacja Regionalnego Tła Wilgotnościowego (CGLS Soil Water Index)
     swi_1km = bands_25m.get("swi_1km")
     if swi_1km is not None:
         mean_swi = float(np.nanmean(swi_1km))
-        logger.info(f"Regionalne tło makrohydrologiczne (CGLS SWI T=5): średnia wilgotność {mean_swi:.1f}%")
+        logger.info(f"Regionalne tlo makrohydrologiczne (CGLS SWI T=5): srednia wilgotnosc {mean_swi:.1f}%")
         if mean_swi < 30.0:
-            logger.warning("ALARM REGIONALNY: Silny deficyt wilgoci w strefie korzeniowej drzew (SWI T=5 < 30%)!")
+            logger.warning("ALARM REGIONALNY: Silny deficyt wilgoci w strefie korzeniowej upraw (SWI T=5 < 30%)!")
+
+    swi_profile = bands_25m.get("swi_profile_8depths")
+    if swi_profile is not None and len(swi_profile.shape) == 3 and swi_profile.shape[0] == 8:
+        depth_names = bands_25m.get("swi_depth_names", ["T=2", "T=5", "T=10", "T=15", "T=20", "T=40", "T=60", "T=100"])
+        means = [float(np.nanmean(swi_profile[i])) for i in range(8)]
+        prof_summary = ", ".join(f"{depth_names[i]}: {means[i]:.1f}%" for i in range(8))
+        logger.info(f"Pionowy profil wilgotnosci gleby CDSE SWI: {prof_summary}")
+        # Wykrywanie inwersji profilu glebowego (wysuszenie glebokie)
+        if means[7] < means[0] - 10.0:
+            logger.warning("OSTRZEZENIE HYDROLOGICZNE: Odwrocony gradient wilgotnosci - gleboki drenaz i deficyt rezerwuaru wodnego (T=100 < T=2)!")
+
+    ppi_qflag = bands_25m.get("ppi_qflag")
+    if ppi_qflag is not None:
+        valid_qflags = np.unique(ppi_qflag[~np.isnan(ppi_qflag)])
+        logger.info(f"Flagi jakosci rekonstrukcji fenologicznej HR-VPP ST QFLAG: {valid_qflags.tolist()}")
 
     # 7. Protokół Walda (walidacja kanału B04)
     wald_metrics = run_wald_protocol_validation(b04_10m, sigma_blur=1.5, decimation_factor=4)

@@ -36,6 +36,12 @@ def run_integration_test():
 
     dem = np.random.uniform(110.0, 190.0, (h_10m, w_10m)).astype(np.float32)
     s3_lst_raw = np.random.uniform(23.0, 31.0, (8, 8)).astype(np.float32)
+    s2_bands["swi_1km"] = np.random.uniform(35.0, 65.0, (h_10m, w_10m)).astype(np.float32)
+    s2_bands["swi_profile_8depths"] = np.random.uniform(30.0, 70.0, (8, h_10m, w_10m)).astype(np.float32)
+    s2_bands["swi_depth_names"] = ["T=2", "T=5", "T=10", "T=15", "T=20", "T=40", "T=60", "T=100"]
+    s2_bands["ppi_10m"] = np.random.uniform(0.3, 1.8, (h_10m, w_10m)).astype(np.float32)
+    s2_bands["ppi_qflag"] = np.full((h_10m, w_10m), 4.0, dtype=np.float32)
+
     profile_10m = {
         'driver': 'GTiff',
         'width': w_10m,
@@ -56,27 +62,27 @@ def run_integration_test():
     # Krok 2: Korejestracja i downscaling
     print("\n--- Test Kroku 2: align_and_scale_lst ---")
     lst_10m = align_and_scale_lst(s2_bands, s3_lst_raw, dem, profile_10m)
-    assert lst_10m.shape == (h_10m, w_10m), f"Błędny wymiar LST 10m: {lst_10m.shape}"
-    assert not np.isnan(lst_10m).all(), "LST 10m zawiera same wartości NaN!"
-    print(" Krok 2 ZDANY. Wymiary LST 10m:", lst_10m.shape)
+    assert lst_10m.shape == (h_10m, w_10m), f"Bledny wymiar LST 10m: {lst_10m.shape}"
+    assert not np.isnan(lst_10m).all(), "LST 10m zawiera same wartosci NaN!"
+    print("[OK] Krok 2 ZDANY. Wymiary LST 10m:", lst_10m.shape)
 
-    # Krok 3: Super-Rozdzielczość SEN2SR i Fuzja ATPRK
+    # Krok 3: Super-Rozdzielczosc SEN2SR i Fuzja ATPRK
     print("\n--- Test Kroku 3: super_resolve_bands ---")
     bands_25m, profile_25m = super_resolve_bands(s2_bands, lst_10m, profile_10m)
-    assert profile_25m['transform'].a == 2.5, "Transformacja afiniczna nie ma rozdzielczości 2.5m!"
-    assert bands_25m['B04'].shape == (h_10m * 4, w_10m * 4), "B04 nie ma wymiarów 2.5m!"
-    assert bands_25m['B05'].shape == (h_10m * 4, w_10m * 4), "B05 nie ma wymiarów 2.5m!"
-    assert bands_25m['LST_2.5m'].shape == (h_10m * 4, w_10m * 4), "LST 2.5m nie ma wymiarów 2.5m!"
-    print(" Krok 3 ZDANY. Wymiary siatki 2.5m:", bands_25m['B04'].shape)
+    assert profile_25m['transform'].a == 2.5, "Transformacja afiniczna nie ma rozdzielczosci 2.5m!"
+    assert bands_25m['B04'].shape == (h_10m * 4, w_10m * 4), "B04 nie ma wymiarow 2.5m!"
+    assert bands_25m['B05'].shape == (h_10m * 4, w_10m * 4), "B05 nie ma wymiarow 2.5m!"
+    assert bands_25m['LST_2.5m'].shape == (h_10m * 4, w_10m * 4), "LST 2.5m nie ma wymiarow 2.5m!"
+    print("[OK] Krok 3 ZDANY. Wymiary siatki 2.5m:", bands_25m['B04'].shape)
 
-    # Krok 4: Wskaźniki, Alerty i Test Walda
+    # Krok 4: Wskazniki, Alerty i Test Walda
     print("\n--- Test Kroku 4: compute_metrics_and_alerts ---")
     products, metrics = compute_metrics_and_alerts(bands_25m, lst_10m, baseline_stats, profile_25m)
-    assert 'tcari_osavi_25m' in products, "Brak wskaźnika TCARI/OSAVI w wynikach!"
+    assert 'tcari_osavi_25m' in products, "Brak wskaznika TCARI/OSAVI w wynikach!"
     assert 'alert_mask_25m' in products, "Brak alert_mask w wynikach!"
     assert products['alert_mask_25m'].dtype == np.uint8, "alert_mask nie jest typu uint8!"
     assert 'rmse' in metrics and 'sam_degrees' in metrics and 'ssim' in metrics, "Brak metryk Walda!"
-    print(f" Krok 4 ZDANY. Metryki Walda: RMSE={metrics['rmse']:.4f}, SAM={metrics['sam_degrees']:.2f}°, SSIM={metrics['ssim']:.4f}")
+    print(f"[OK] Krok 4 ZDANY. Metryki Walda: RMSE={metrics['rmse']:.4f}, SAM={metrics['sam_degrees']:.2f} deg, SSIM={metrics['ssim']:.4f}")
 
     # Krok 5: Test Zapisu COG i Raportu
     print("\n--- Test Kroku 5: Zapis COG i Raport ---")
@@ -92,11 +98,11 @@ def run_integration_test():
         alert_mask=products['alert_mask_25m'],
         output_dir=test_out
     )
-    assert os.path.exists(report), "Raport Markdown nie został utworzony!"
-    print(" Krok 5 ZDANY. Utworzono pliki COG i raport walidacyjny.")
+    assert os.path.exists(report), "Raport Markdown nie zostal utworzony!"
+    print("[OK] Krok 5 ZDANY. Utworzono pliki COG i raport walidacyjny.")
 
     print("\n================================================================================")
-    print("WSZYSTKIE TESTY JEDNOSTKOWE I INTEGRACYJNE ZAKOŃCZYŁY SIĘ PEŁNYM SUKCESEM!")
+    print("WSZYSTKIE TESTY JEDNOSTKOWE I INTEGRACYJNE ZAKONCZYLY SIE PELNYM SUKCESEM!")
     print("================================================================================")
 
 if __name__ == "__main__":

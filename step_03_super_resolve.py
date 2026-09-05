@@ -358,6 +358,12 @@ def super_resolve_bands(
 
     if "swi_1km" in s2_bands:
         bands_25m["swi_1km"] = s2_bands["swi_1km"]
+    if "swi_profile_8depths" in s2_bands:
+        bands_25m["swi_profile_8depths"] = s2_bands["swi_profile_8depths"]
+    if "swi_depth_names" in s2_bands:
+        bands_25m["swi_depth_names"] = s2_bands["swi_depth_names"]
+    if "ppi_qflag" in s2_bands:
+        bands_25m["ppi_qflag"] = s2_bands["ppi_qflag"]
 
     # 5. Aktualizacja Profilu Georeferencyjnego dla piksela 2.5 m
     logger.info("Krok 3d: Aktualizacja transformacji afinicznej profilu georeferencyjnego 2.5 m...")

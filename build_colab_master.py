@@ -205,22 +205,35 @@ except Exception as e:
 
     add_code("""import geopandas as gpd
 
+# Bezpieczne wczytanie poswiadczen Copernicus Data Space Ecosystem (CDSE)
+# Wpisz je w lewym panelu Colab: 'Secrets' (ikona klucza) jako CDSE_CLIENT_ID i CDSE_CLIENT_SECRET
+try:
+    from google.colab import userdata
+    cdse_id = userdata.get('CDSE_CLIENT_ID')
+    cdse_secret = userdata.get('CDSE_CLIENT_SECRET')
+except Exception:
+    import os
+    cdse_id = os.environ.get('CDSE_CLIENT_ID', '')
+    cdse_secret = os.environ.get('CDSE_CLIENT_SECRET', '')
+
 CONFIG = {
     'LAT': 43.9752,
     'LON': 0.3376,
     'TARGET_DATE': '2023-07-15',
-    'BUFFER_M': 0,  # 0, ponieważ plik ZASIEG zawiera już zoptymalizowany bufor poligonu
+    'BUFFER_M': 0,  # 0, poniewaz plik ZASIEG zawiera juz zoptymalizowany bufor poligonu
     'BASELINE_YEARS': (2018, 2025),
     'GEE_PROJECT': 'ee-geoworldlook',
+    'CDSE_CLIENT_ID': cdse_id,
+    'CDSE_CLIENT_SECRET': cdse_secret,
     'GEOJSON_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM_ZASIEG.geojson'),
     'PARCELS_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM.geojson'),
     'OUTPUT_DIR': os.path.join(PROJECT_DIR, 'data', '05_Final_Outputs'),
-    'DOWNLOAD_HISTORICAL': True  # Pobieranie wszystkich dostępnych scen S2 od 2016 do dziś
+    'DOWNLOAD_HISTORICAL': True  # Budowa wieloletniej bazy danych 2016-dzis (S2, CGLS SWI, CLMS HR-VPP)
 }
 
 gdf_zasieg = gpd.read_file(CONFIG['GEOJSON_PATH'])
 gdf_parcels = gpd.read_file(CONFIG['PARCELS_PATH'])
-print(f'Wczytano bufor zasięgu obliczeniowego oraz {len(gdf_parcels)} działek referencyjnych.')
+print(f'Wczytano bufor zasiegu obliczeniowego oraz {len(gdf_parcels)} dzialek referencyjnych.')
 display(gdf_parcels[['fid', 'Typ', 'geometry']].head(5))
 
 # Zabezpieczenie przed Timeoutem na kluczu GOOGLE_MAPS_API_KEY w Google Colab
@@ -235,27 +248,29 @@ try:
 except Exception:
     pass
 
-# Interaktywna mapa podglądowa Geemap (backend foliumap zoptymalizowany pod Colab)
+# Interaktywna mapa podgladowa Geemap (backend foliumap zoptymalizowany pod Colab)
 try:
     import geemap.foliumap as geemap
     m = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=14)
     m.add_basemap('HYBRID')
     m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Zasieg Bufora AOI')
-    m.add_geojson(CONFIG['PARCELS_PATH'], layer_name='Działki GBOV (Sady i Winnice)')
+    m.add_geojson(CONFIG['PARCELS_PATH'], layer_name='Dzialki GBOV (Sady i Winnice)')
 except Exception:
     import geemap
     m = geemap.Map(center=[CONFIG['LAT'], CONFIG['LON']], zoom=14)
     m.add_basemap('HYBRID')
     m.add_geojson(CONFIG['GEOJSON_PATH'], layer_name='Zasieg Bufora AOI')
-    m.add_geojson(CONFIG['PARCELS_PATH'], layer_name='Działki GBOV (Sady i Winnice)')
+    m.add_geojson(CONFIG['PARCELS_PATH'], layer_name='Dzialki GBOV (Sady i Winnice)')
 m
 """)
 
     # 7. Moduł 1: Ingestia
-    add_md("""## MODUŁ 1: Ingestia Rzeczywistych Danych Satelitarnych i Bazy GEE (`step_01_ingest.py`)
-Pobiera z GEE: Sentinel-2 L2A (10 pasm BOA z maską chmur i geometryczną projekcją cieni), Sentinel-3 / 1km LST, Copernicus DEM GLO-30, Maskę Upraw Trwałych ($M_{crop}$), CGLS SWI $T=5$ oraz fenologię HR-VPP PPI wraz z wieloletnią bazą referencyjną 2018–2025.""")
+    add_md("""## MODUŁ 1: Ingestia Rzeczywistych Danych Satelitarnych i Bazy GEE/Copernicus (`step_01_ingest.py`)
+Pobiera w modelu hybrydowym:
+- Z GEE: Sentinel-2 L2A (10 pasm BOA z maska s2cloudless i geometryczna projekcja cieni), Sentinel-3 SLSTR / 1km LST, Copernicus DEM GLO-30 oraz wieloletnia baze referencyjna 2018-2025.
+- Z Copernicus CDSE API: Oficjalny wielopoziomowy profil wilgotnosci gleby CGLS SWI 1km (8 glebokosci T=2..100) oraz gotowa trajektorie fenologiczna Copernicus CLMS HR-VPP ST 10m (PPI + QFLAG) bez sztucznych przyblizen.""")
 
-    add_code("""# Bezpośredni import z modułu na Dysku Google
+    add_code("""# Bezposredni import z modulu na Dysku Google
 from step_01_ingest import ingest_satellite_data
 
 s2_bands, profile_10m, baseline_stats = ingest_satellite_data(
@@ -266,16 +281,19 @@ s2_bands, profile_10m, baseline_stats = ingest_satellite_data(
     baseline_years=CONFIG['BASELINE_YEARS'],
     geojson_path=CONFIG['GEOJSON_PATH'],
     download_historical_series=CONFIG['DOWNLOAD_HISTORICAL'],
-    gee_project=CONFIG.get('GEE_PROJECT', 'ee-geoworldlook')
+    gee_project=CONFIG.get('GEE_PROJECT', 'ee-geoworldlook'),
+    cdse_client_id=CONFIG.get('CDSE_CLIENT_ID'),
+    cdse_client_secret=CONFIG.get('CDSE_CLIENT_SECRET')
 )
 
-print('[OK] KROK 1 ZAKOŃCZONY POMYŚLNIE:')
+print('[OK] KROK 1 ZAKONCZONY POMYSLNIE:')
 print(f' - Pobrane pasma S2: {list(s2_bands.keys())}')
-print(f' - Rozmiar siatki 10m: {s2_bands[\"B04\"].shape}')
-print(f' - Maska HRL M_crop: {s2_bands[\"crop_mask\"].shape} (sad_jablonek, winnice)')
-print(f' - Regionalny SWI T=5: {s2_bands[\"swi_1km\"].shape}')
-print(f' - Trajektoria fenologiczna HR-VPP PPI: {s2_bands[\"ppi_10m\"].shape}')
-print(f' - Profil CRS: {profile_10m[\"crs\"]}')
+print(f' - Rozmiar siatki 10m: {s2_bands["B04"].shape}')
+print(f' - Maska HRL M_crop: {s2_bands["crop_mask"].shape} (sad_jablonek, winnice)')
+print(f' - Regionalny SWI T=5: {s2_bands["swi_1km"].shape}')
+print(f' - Profil glebowy CGLS SWI (8 glebokosci): {s2_bands["swi_profile_8depths"].shape}')
+print(f' - Trajektoria fenologiczna HR-VPP PPI: {s2_bands["ppi_10m"].shape}')
+print(f' - Profil CRS: {profile_10m["crs"]}')
 """)
 
     # 8. Moduł 2: Downscaling pyDMS

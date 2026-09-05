@@ -65,6 +65,13 @@ S2_BAND_MAP_HARMONIZED = {
 REFLECTANCE_SCALE_FACTOR = 10000.0  # BOA L2A integer -> [0.0, 1.0]
 EPSILON = 1e-6
 
+# Copernicus Data Space Ecosystem (CDSE) / Sentinel Hub Process API
+CDSE_TOKEN_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+CDSE_PROCESS_URL = "https://sh.dataspace.copernicus.eu/api/v1/process"
+CDSE_SWI_COLLECTION_ID = "byoc-bd02588b-7236-4b1e-9480-aeae7dce3c7a"
+CDSE_HRVPP_COLLECTION_ID = "byoc-90f0abac-87cf-4277-958b-d8c56d9e5371"
+SWI_DEPTH_NAMES = ["T=2", "T=5", "T=10", "T=15", "T=20", "T=40", "T=60", "T=100"]
+
 
 # ==============================================================================
 # I. POMOCNICZE FUNKCJE GEOREFERENCYJNE I AOI
@@ -365,128 +372,459 @@ def get_thermal_lst_1km(
         return era5
 
 
-def get_cgls_soil_water_index(
-    aoi: ee.Geometry,
-    target_datetime_str: str
-) -> ee.Image:
+# ==============================================================================
+# IV. OFICJALNY KLIENT COPERNICUS DATA SPACE ECOSYSTEM (CDSE) DLA SWI I HR-VPP
+# ==============================================================================
+
+_CDSE_TOKEN_CACHE: Dict[str, Any] = {"token": None, "expires_at": 0.0}
+
+
+def get_cdse_credentials(
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None
+) -> Tuple[Optional[str], Optional[str]]:
     """
-    Regionalny Indeks Wilgotnosci (CGLS Soil Water Index / ERA5-Land SWI - 1 km):
-    Pobiera produkt SWI dla parametru T = 5 (strefa korzeniowa upraw trwalych).
-    Sluzy jako tlo regionalne do weryfikacji skali suszy w skali makro.
+    Bezpiecznie pobiera poswiadczenia CDSE (Sentinel Hub Process API).
+    Priorytet:
+      1. Bezposrednie parametry funkcji (przekazane w wywolaniu).
+      2. Magazyn kluczy Google Colab Secrets (userdata.get).
+      3. Zmienne srodowiskowe systemu operacyjnego (os.environ).
+      4. Lokalny plik .env (ignorowany przez git).
     """
-    target_dt = datetime.strptime(target_datetime_str[:10], "%Y-%m-%d")
-    start_dt = (target_dt - timedelta(days=5)).strftime("%Y-%m-%d")
-    end_dt = (target_dt + timedelta(days=6)).strftime("%Y-%m-%d")
+    if client_id and client_secret:
+        return client_id, client_secret
 
-    # 1. Proba pobrania natywnego produktu CGLS SWI
+    # 1. Google Colab Secrets
     try:
-        swi_col = ee.ImageCollection('COPERNICUS/CGLS/SWI').filterBounds(aoi).filterDate(start_dt, end_dt)
-        if swi_col.size().getInfo() > 0:
-            logger.info("Pobrano produkt CGLS SWI T=5 (1 km) z repozytorium Copernicus.")
-            swi_img = swi_col.first().select(['SWI_005', 'SWI_T5', 'SWI']).first()
-            return swi_img.clip(aoi).rename('SWI_T5')
+        from google.colab import userdata
+        c_id = userdata.get('CDSE_CLIENT_ID')
+        c_sec = userdata.get('CDSE_CLIENT_SECRET')
+        if c_id and c_sec:
+            return str(c_id).strip(), str(c_sec).strip()
     except Exception:
         pass
 
-    # 2. Reanaliza ECMWF ERA5-Land Daily (wilgotnosc gleby strefy korzeniowej 7-28 cm)
-    try:
-        era5_col = (
-            ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
-            .filterBounds(aoi)
-            .filterDate(start_dt, end_dt)
-            .select(['volumetric_soil_water_layer_1', 'volumetric_soil_water_layer_2'])
-        )
-        if era5_col.size().getInfo() > 0:
-            logger.info("Obliczanie regionalnego wskaznika wilgotnosci gleby z ERA5-Land Daily (SWI proxy)...")
-            era5_mean = era5_col.mean()
-            swi_proxy = (
-                era5_mean.select('volumetric_soil_water_layer_2')
-                .multiply(200.0)
-                .clamp(0.0, 100.0)
-                .clip(aoi)
-                .rename('SWI_T5')
-            )
-            return swi_proxy
-    except Exception:
-        pass
+    # 2. Zmienne srodowiskowe
+    c_id = os.environ.get('CDSE_CLIENT_ID')
+    c_sec = os.environ.get('CDSE_CLIENT_SECRET')
+    if c_id and c_sec:
+        return str(c_id).strip(), str(c_sec).strip()
 
-    # 3. NASA-USDA SMAP Global Soil Moisture
-    try:
-        smap_col = (
-            ee.ImageCollection('NASA_USDA/HSL/SMAP_soil_moisture')
-            .filterBounds(aoi)
-            .filterDate(start_dt, end_dt)
-        )
-        if smap_col.size().getInfo() > 0:
-            logger.info("Obliczanie regionalnego wskaznika wilgotnosci gleby z NASA SMAP...")
-            smap = smap_col.select('smp_rootzone').mean()
-            return smap.multiply(100.0).clip(aoi).rename('SWI_T5')
-    except Exception:
-        pass
-
-    # 4. Gwarantowane tlo referencyjne (SWI = 38.0% - typowy stan wilgotnosci gleby w Condom w lipcu)
-    logger.info("Uzycie referencyjnego profilu wilgotnosci gleby strefy korzeniowej (SWI = 38.0%)...")
-    return ee.Image.constant(38.0).clip(aoi).rename('SWI_T5')
-
-
-def get_hrvpp_seasonal_trajectory_ppi(
-    aoi: ee.Geometry,
-    target_datetime_str: str,
-    fallback_s2: Optional[ee.Image] = None
-) -> ee.Image:
-    """
-    Trajektorie Sezonowe (HR-VPP ST - 10 m):
-    Pobiera oczyszczona z chmur i zinterpolowana serie wskaznika PPI
-    (Plant Phenology Index). Eliminuje to potrzebe recznego gap-fillingu surowych scen Sentinel-2.
-    """
-    target_dt = datetime.strptime(target_datetime_str[:10], "%Y-%m-%d")
-    start_dt = (target_dt - timedelta(days=15)).strftime("%Y-%m-%d")
-    end_dt = (target_dt + timedelta(days=16)).strftime("%Y-%m-%d")
-
-    def calc_ppi(img: ee.Image) -> ee.Image:
-        b4 = img.select('B4').divide(REFLECTANCE_SCALE_FACTOR)
-        b8 = img.select('B8').divide(REFLECTANCE_SCALE_FACTOR)
-        dvi = b8.subtract(b4)
-        # DVI_max = 0.85, DVI_soil = 0.09, K = 0.4
-        dvi_clamped = dvi.clamp(0.091, 0.84)
-        ratio_term = (ee.Image.constant(0.85).subtract(dvi_clamped)).divide(0.76)
-        ppi = ratio_term.log().multiply(-0.4).rename('PPI_10m')
-        return ppi
-
-    # 1. Proba pobrania natywnego HR-VPP ST z katalogu CLMS
-    try:
-        hrvpp_col = ee.ImageCollection('COPERNICUS/CLMS/HRVPP/V1/ST').filterBounds(aoi).filterDate(start_dt, end_dt)
-        if hrvpp_col.size().getInfo() > 0:
-            logger.info("Pobrano Trajektorie Sezonowa HR-VPP ST (PPI) z katalogu CLMS.")
-            return hrvpp_col.first().select('PPI').clip(aoi).rename('PPI_10m')
-    except Exception:
-        pass
-
-    # 2. Obliczenie wskaznika PPI z kolekcji S2 wokol zadanego dnia
-    try:
-        s2_col = (
-            ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-            .filterBounds(aoi)
-            .filterDate(start_dt, end_dt)
-            .filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', 40))
-        )
-        if s2_col.size().getInfo() > 0:
-            logger.info("Obliczanie bezszumnej trajektorii fenologicznej PPI (Plant Phenology Index 10 m)...")
-            return s2_col.map(calc_ppi).median().clip(aoi).rename('PPI_10m')
-    except Exception:
-        pass
-
-    # 3. Obliczenie PPI bezposrednio ze sceny referencyjnej S2 (jesli przekazana)
-    if fallback_s2 is not None:
-        logger.info("Obliczanie wskaznika PPI bezposrednio ze sceny referencyjnej Sentinel-2...")
+    # 3. Lokalny plik .env
+    env_file = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(env_file):
         try:
-            return calc_ppi(fallback_s2).clip(aoi).rename('PPI_10m')
+            with open(env_file, "r", encoding="utf-8") as ef:
+                for line in ef:
+                    line = line.strip()
+                    if line.startswith("CDSE_CLIENT_ID="):
+                        c_id = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    elif line.startswith("CDSE_CLIENT_SECRET="):
+                        c_sec = line.split("=", 1)[1].strip().strip('"').strip("'")
+            if c_id and c_sec:
+                return c_id, c_sec
         except Exception:
             pass
 
-    # 4. Referencyjna wartosc bazowa PPI = 0.45
-    logger.info("Uzycie bazowej trajektorii PPI = 0.45...")
-    return ee.Image.constant(0.45).clip(aoi).rename('PPI_10m')
+    return None, None
+
+
+def get_cdse_access_token(client_id: str, client_secret: str) -> str:
+    """
+    Pobiera token dostepu OAuth2 z serwera tozsamosci CDSE.
+    Stosuje buforowanie w pamieci podrecznej pod katem czasu waznosci tokena.
+    """
+    global _CDSE_TOKEN_CACHE
+    now = time.time()
+    if _CDSE_TOKEN_CACHE["token"] and now < (_CDSE_TOKEN_CACHE["expires_at"] - 60):
+        return _CDSE_TOKEN_CACHE["token"]
+
+    import urllib.request
+    import urllib.parse
+
+    data = urllib.parse.urlencode({
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        CDSE_TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp_data = json.loads(resp.read().decode("utf-8"))
+            token = resp_data["access_token"]
+            expires_in = resp_data.get("expires_in", 3600)
+            _CDSE_TOKEN_CACHE["token"] = token
+            _CDSE_TOKEN_CACHE["expires_at"] = now + float(expires_in)
+            logger.info("Pomyslnie uzyskano i zbuforowano token dostepu CDSE OAuth2.")
+            return token
+    except Exception as exc:
+        logger.error(f"Blad uwierzytelnienia w CDSE OAuth2: {exc}")
+        raise RuntimeError(
+            f"Nie udalo sie uzyskac tokenu CDSE OAuth2 ({exc}). "
+            "Upewnij sie, ze CDSE_CLIENT_ID i CDSE_CLIENT_SECRET sa poprawne."
+        )
+
+
+def fetch_cdse_swi_multidepth(
+    bounds_utm: List[float],
+    profile_10m: Dict[str, Any],
+    target_date_str: str,
+    output_path: str,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None
+) -> str:
+    """
+    Pobiera oficjalny produkt CGLS Soil Water Index (SWI 1km) dla Europy z Copernicus CDSE
+    dla wszystkich 8 poziomow glebokosci: T=2, 5, 10, 15, 20, 40, 60, 100.
+    Zapisuje 8-kanalowy GeoTIFF dopasowany bezposrednio do siatki UTM 31N profilu 10m.
+    """
+    c_id, c_sec = get_cdse_credentials(client_id, client_secret)
+    if not c_id or not c_sec:
+        raise ValueError(
+            "Brak poswiadczen CDSE (CDSE_CLIENT_ID i CDSE_CLIENT_SECRET). "
+            "Ustaw je w Google Colab Secrets (ikona klucza) lub jako zmienne srodowiskowe."
+        )
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    token = get_cdse_access_token(c_id, c_sec)
+
+    target_dt = datetime.strptime(target_date_str[:10], "%Y-%m-%d")
+    date_from = (target_dt - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00Z")
+    date_to = target_dt.strftime("%Y-%m-%dT23:59:59Z")
+
+    evalscript = """//VERSION=3
+function setup() {
+  return {
+    input: ["SWI002", "SWI005", "SWI010", "SWI015", "SWI020", "SWI040", "SWI060", "SWI100"],
+    output: { bands: 8, sampleType: "FLOAT32" }
+  };
+}
+function evaluatePixel(sample) {
+  return [
+    sample.SWI002 * 0.5,
+    sample.SWI005 * 0.5,
+    sample.SWI010 * 0.5,
+    sample.SWI015 * 0.5,
+    sample.SWI020 * 0.5,
+    sample.SWI040 * 0.5,
+    sample.SWI060 * 0.5,
+    sample.SWI100 * 0.5
+  ];
+}
+"""
+    crs_str = profile_10m.get("crs", "EPSG:32631")
+    if hasattr(crs_str, "to_string"):
+        crs_str = crs_str.to_string()
+    epsg_num = str(crs_str).split(":")[-1]
+
+    payload = {
+        "input": {
+            "bounds": {
+                "bbox": [float(b) for b in bounds_utm],
+                "properties": {"crs": f"http://www.opengis.net/def/crs/EPSG/0/{epsg_num}"}
+            },
+            "data": [{
+                "type": CDSE_SWI_COLLECTION_ID,
+                "dataFilter": {
+                    "timeRange": {
+                        "from": date_from,
+                        "to": date_to
+                    },
+                    "mosaickingOrder": "mostRecent"
+                }
+            }]
+        },
+        "output": {
+            "width": int(profile_10m["width"]),
+            "height": int(profile_10m["height"]),
+            "responses": [{"identifier": "default", "format": {"type": "image/tiff"}}]
+        },
+        "evalscript": evalscript
+    }
+
+    import urllib.request
+    import io
+
+    req = urllib.request.Request(
+        CDSE_PROCESS_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "image/tiff"
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            content = resp.read()
+        with rasterio.open(io.BytesIO(content)) as src:
+            data = src.read().astype(np.float32)
+            out_prof = profile_10m.copy()
+            out_prof.update({
+                "count": 8,
+                "dtype": "float32",
+                "nodata": -9999.0
+            })
+            with rasterio.open(output_path, "w", **out_prof) as dst:
+                for b_idx in range(8):
+                    dst.write(data[b_idx], b_idx + 1)
+                    dst.set_band_description(b_idx + 1, SWI_DEPTH_NAMES[b_idx])
+        logger.info(f"Pomyslnie pobrano 8-poziomowy profil CGLS SWI z CDSE do: {output_path}")
+        return output_path
+    except Exception as exc:
+        logger.error(f"Blad podczas pobierania SWI z CDSE: {exc}")
+        raise RuntimeError(f"Pobieranie CGLS SWI z CDSE zakonczone niepowodzeniem: {exc}")
+
+
+def fetch_cdse_hrvpp_st(
+    bounds_utm: List[float],
+    profile_10m: Dict[str, Any],
+    target_date_str: str,
+    output_path: str,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None
+) -> str:
+    """
+    Pobiera oficjalny produkt Copernicus CLMS HR-VPP Seasonal Trajectories (ST 10m)
+    z Copernicus CDSE. Zawiera 10-dniowa zrekonstruowana serie wskaznika PPI
+    oraz flage jakosci dopasowania QFLAG.
+    """
+    c_id, c_sec = get_cdse_credentials(client_id, client_secret)
+    if not c_id or not c_sec:
+        raise ValueError(
+            "Brak poswiadczen CDSE (CDSE_CLIENT_ID i CDSE_CLIENT_SECRET). "
+            "Ustaw je w Google Colab Secrets (ikona klucza) lub jako zmienne srodowiskowe."
+        )
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    token = get_cdse_access_token(c_id, c_sec)
+
+    target_dt = datetime.strptime(target_date_str[:10], "%Y-%m-%d")
+    date_from = (target_dt - timedelta(days=15)).strftime("%Y-%m-%dT00:00:00Z")
+    date_to = (target_dt + timedelta(days=5)).strftime("%Y-%m-%dT23:59:59Z")
+
+    evalscript = """//VERSION=3
+function setup() {
+  return {
+    input: ["PPI", "QFLAG"],
+    output: { bands: 2, sampleType: "FLOAT32" }
+  };
+}
+function evaluatePixel(sample) {
+  let ppi_val = (sample.PPI === 32768) ? -9999.0 : sample.PPI / 10000.0;
+  return [ppi_val, sample.QFLAG];
+}
+"""
+    crs_str = profile_10m.get("crs", "EPSG:32631")
+    if hasattr(crs_str, "to_string"):
+        crs_str = crs_str.to_string()
+    epsg_num = str(crs_str).split(":")[-1]
+
+    payload = {
+        "input": {
+            "bounds": {
+                "bbox": [float(b) for b in bounds_utm],
+                "properties": {"crs": f"http://www.opengis.net/def/crs/EPSG/0/{epsg_num}"}
+            },
+            "data": [{
+                "type": CDSE_HRVPP_COLLECTION_ID,
+                "dataFilter": {
+                    "timeRange": {
+                        "from": date_from,
+                        "to": date_to
+                    },
+                    "mosaickingOrder": "mostRecent"
+                }
+            }]
+        },
+        "output": {
+            "width": int(profile_10m["width"]),
+            "height": int(profile_10m["height"]),
+            "responses": [{"identifier": "default", "format": {"type": "image/tiff"}}]
+        },
+        "evalscript": evalscript
+    }
+
+    import urllib.request
+    import io
+
+    req = urllib.request.Request(
+        CDSE_PROCESS_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "image/tiff"
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            content = resp.read()
+        with rasterio.open(io.BytesIO(content)) as src:
+            data = src.read().astype(np.float32)
+            out_prof = profile_10m.copy()
+            out_prof.update({
+                "count": 2,
+                "dtype": "float32",
+                "nodata": -9999.0
+            })
+            with rasterio.open(output_path, "w", **out_prof) as dst:
+                dst.write(data[0], 1)
+                dst.set_band_description(1, "PPI_10m")
+                dst.write(data[1], 2)
+                dst.set_band_description(2, "QFLAG")
+        logger.info(f"Pomyslnie pobrano oficjalny produkt Copernicus CLMS HR-VPP ST z CDSE do: {output_path}")
+        return output_path
+    except Exception as exc:
+        logger.error(f"Blad podczas pobierania HR-VPP z CDSE: {exc}")
+        raise RuntimeError(f"Pobieranie Copernicus HR-VPP z CDSE zakonczone niepowodzeniem: {exc}")
+
+
+def sync_cdse_swi_time_series(
+    bounds_utm: List[float],
+    profile_10m: Dict[str, Any],
+    start_year: int = 2016,
+    end_year: Optional[int] = None,
+    output_dir: str = "data/03_Copernicus_Auxiliary/SWI",
+    manifest_path: str = "data/00_Metadata/ingest_manifest.json",
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    sample_interval_days: int = 10
+) -> List[str]:
+    """
+    Przyrostowa synchronizacja wieloletniej serii CGLS SWI (8 glebokosci) od start_year do dzis.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+
+    if end_year is None:
+        end_year = datetime.now().year
+
+    manifest: Dict[str, Any] = {}
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as mf:
+                manifest = json.load(mf)
+        except Exception:
+            manifest = {}
+    downloaded_swi = manifest.setdefault("downloaded_swi", {})
+
+    cur_dt = datetime(start_year, 1, 1)
+    end_dt = datetime.now()
+    dates_to_fetch: List[datetime] = []
+    while cur_dt <= end_dt:
+        dates_to_fetch.append(cur_dt)
+        cur_dt += timedelta(days=sample_interval_days)
+
+    logger.info(f"--- SYNCHRONIZACJA PRZYROSTOWA CGLS SWI: {len(dates_to_fetch)} terminow od {start_year} do {end_year} ---")
+    downloaded_files: List[str] = []
+
+    for dt in dates_to_fetch:
+        dt_str = dt.strftime("%Y-%m-%d")
+        fn = f"CGLS_SWI_8depths_{dt_str}.tif"
+        fp = os.path.join(output_dir, fn)
+        if dt_str in downloaded_swi and os.path.exists(fp) and os.path.getsize(fp) > 1024:
+            downloaded_files.append(fp)
+            continue
+
+        try:
+            fetch_cdse_swi_multidepth(
+                bounds_utm=bounds_utm,
+                profile_10m=profile_10m,
+                target_date_str=dt_str,
+                output_path=fp,
+                client_id=client_id,
+                client_secret=client_secret
+            )
+            downloaded_swi[dt_str] = {
+                "filepath": fp,
+                "downloaded_at": datetime.now().isoformat()
+            }
+            with open(manifest_path, "w", encoding="utf-8") as mf:
+                json.dump(manifest, mf, indent=2)
+            downloaded_files.append(fp)
+        except Exception as exc:
+            logger.warning(f"Pominiecie terminu SWI {dt_str}: {exc}")
+
+    logger.info(f"Synchronizacja CGLS SWI zakonczona. Gotowych pakietow profilu: {len(downloaded_files)}.")
+    return downloaded_files
+
+
+def sync_cdse_hrvpp_time_series(
+    bounds_utm: List[float],
+    profile_10m: Dict[str, Any],
+    start_year: int = 2017,
+    end_year: Optional[int] = None,
+    output_dir: str = "data/03_Copernicus_Auxiliary/HRVPP",
+    manifest_path: str = "data/00_Metadata/ingest_manifest.json",
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    sample_interval_days: int = 10
+) -> List[str]:
+    """
+    Przyrostowa synchronizacja wieloletniej serii Copernicus CLMS HR-VPP ST (PPI + QFLAG 10m).
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+
+    if end_year is None:
+        end_year = datetime.now().year
+
+    manifest: Dict[str, Any] = {}
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as mf:
+                manifest = json.load(mf)
+        except Exception:
+            manifest = {}
+    downloaded_hrvpp = manifest.setdefault("downloaded_hrvpp", {})
+
+    cur_dt = datetime(start_year, 1, 1)
+    end_dt = datetime.now()
+    dates_to_fetch: List[datetime] = []
+    while cur_dt <= end_dt:
+        dates_to_fetch.append(cur_dt)
+        cur_dt += timedelta(days=sample_interval_days)
+
+    logger.info(f"--- SYNCHRONIZACJA PRZYROSTOWA HR-VPP ST: {len(dates_to_fetch)} terminow od {start_year} do {end_year} ---")
+    downloaded_files: List[str] = []
+
+    for dt in dates_to_fetch:
+        dt_str = dt.strftime("%Y-%m-%d")
+        fn = f"CLMS_HRVPP_ST_10m_{dt_str}.tif"
+        fp = os.path.join(output_dir, fn)
+        if dt_str in downloaded_hrvpp and os.path.exists(fp) and os.path.getsize(fp) > 1024:
+            downloaded_files.append(fp)
+            continue
+
+        try:
+            fetch_cdse_hrvpp_st(
+                bounds_utm=bounds_utm,
+                profile_10m=profile_10m,
+                target_date_str=dt_str,
+                output_path=fp,
+                client_id=client_id,
+                client_secret=client_secret
+            )
+            downloaded_hrvpp[dt_str] = {
+                "filepath": fp,
+                "downloaded_at": datetime.now().isoformat()
+            }
+            with open(manifest_path, "w", encoding="utf-8") as mf:
+                json.dump(manifest, mf, indent=2)
+            downloaded_files.append(fp)
+        except Exception as exc:
+            logger.warning(f"Pominiecie terminu HR-VPP {dt_str}: {exc}")
+
+    logger.info(f"Synchronizacja HR-VPP ST zakonczona. Gotowych rastrow fenologii: {len(downloaded_files)}.")
+    return downloaded_files
 
 
 def get_hrl_crop_mask(
@@ -814,30 +1152,34 @@ def ingest_satellite_data(
     geojson_path: Optional[str] = "data/1_AOI_GBOV_CONDOM.geojson",
     output_base_dir: str = "data",
     download_historical_series: bool = False,
-    gee_project: str = "ee-geoworldlook"
+    gee_project: str = "ee-geoworldlook",
+    cdse_client_id: Optional[str] = None,
+    cdse_client_secret: Optional[str] = None
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any], Dict[str, np.ndarray]]:
     """
-    GŁÓWNA FUNKCJA WEJŚCIOWA DLA KROKU 1 (Rygorystyczny kontrakt interfejsu).
+    GLOWNA FUNKCJA WEJSCIOWA DLA KROKU 1 (Rygorystyczny kontrakt interfejsu).
 
-    Pobiera bieżące zobrazowania S2, S3 LST, DEM SRTM/Copernicus oraz historyczne serie S2 (2018-2025),
-    zwracając słowniki tablic NumPy, metadane georeferencyjne oraz profil rastrowy.
+    Pobiera bezchmurne zobrazowania Sentinel-2 L2A z GEE, LST (1km), Copernicus DEM GLO-30 (30m->10m),
+    oficjalny wielopoziomowy profil wilgotnosci gleby CGLS SWI (8 glebokosci) oraz
+    oficjalna trajektorie fenologiczna Copernicus CLMS HR-VPP ST (PPI + QFLAG 10m) z CDSE API.
 
     Parametry:
-        lat, lon: Współrzędne geograficzne punktu docelowego (domyślnie centrum GBOV Condom).
+        lat, lon: Wspolrzedne geograficzne punktu docelowego (domyslnie centrum GBOV Condom).
         target_date: Docelowa data analizy w formacie 'YYYY-MM-DD'.
-        buffer_m: Promień bufora w metrach.
+        buffer_m: Promien bufora w metrach.
         baseline_years: Zakres lat dla wyznaczenia wieloletnich statystyk referencyjnych.
-        geojson_path: Ścieżka do pliku wektorowego działek (AOI).
-        output_base_dir: Główny katalog zapisu danych.
-        download_historical_series: Czy uruchomić pełne przyrostowe pobieranie wszystkich scen od 2016.
+        geojson_path: Sciezka do pliku wektorowego dzialek (AOI).
+        output_base_dir: Glowny katalog zapisu danych.
+        download_historical_series: Czy uruchomic pelne przyrostowe pobieranie wszystkich scen od 2016.
         gee_project: Identyfikator projektu Google Cloud dla Earth Engine.
+        cdse_client_id: Identyfikator klienta CDSE (jesli None, pobierany z Colab Secrets lub env).
+        cdse_client_secret: Klucz klienta CDSE (jesli None, pobierany z Colab Secrets lub env).
 
     Zwraca:
-        s2_bands_dict: Słownik zawierający macierze NumPy float32 dla pasm Sentinel-2
-                       (B02, B03, B04, B05, B06, B07, B08, B8A, B11, B12), 's3_lst_raw' oraz 'dem'.
-        profile_10m: Słownik metadanych profilu georeferencyjnego (Rasterio Affine, CRS, width, height).
-        baseline_stats: Słownik zawierający macierze wieloletnich statystyk:
-                       'tcari_osavi_mean', 'tcari_osavi_std', 'tvdi_mean', 'tvdi_std'.
+        s2_bands_dict: Slownik zawierajacy macierze NumPy float32 dla pasm Sentinel-2,
+                       's3_lst_raw', 'dem', 'swi_1km' (T=5), 'swi_profile_8depths', 'ppi_10m', 'ppi_qflag'.
+        profile_10m: Slownik metadanych profilu georeferencyjnego Rasterio.
+        baseline_stats: Slownik zawierajacy macierze wieloletnich statystyk GEE.
     """
     logger.info("================================================================================")
     logger.info(f"URUCHOMIENIE KROKU 1: Ingestia danych satelitarnych dla daty {target_date}...")
@@ -855,27 +1197,21 @@ def ingest_satellite_data(
         aoi = center_pt.buffer(buffer_m)
         utm_zone = int((lon + 180) // 6) + 1
         epsg_code = 32600 + utm_zone if lat >= 0 else 32700 + utm_zone
-        logger.info(f"Użyto współrzędnych punktowych: lat={lat}, lon={lon}, bufor={buffer_m}m, EPSG:{epsg_code}")
+        logger.info(f"Uzyto wspolrzednych punktowych: lat={lat}, lon={lon}, bufor={buffer_m}m, EPSG:{epsg_code}")
 
-    # Definicja katalogów zapisu
+    # Definicja katalogow zapisu
     dir_s2 = os.path.join(output_base_dir, "01_Raw_Sentinel2")
     dir_lst = os.path.join(output_base_dir, "02_Raw_Thermal_LST")
     dir_aux = os.path.join(output_base_dir, "03_Copernicus_Auxiliary")
+    dir_swi = os.path.join(dir_aux, "SWI")
+    dir_hrvpp = os.path.join(dir_aux, "HRVPP")
     os.makedirs(dir_s2, exist_ok=True)
     os.makedirs(dir_lst, exist_ok=True)
     os.makedirs(dir_aux, exist_ok=True)
+    os.makedirs(dir_swi, exist_ok=True)
+    os.makedirs(dir_hrvpp, exist_ok=True)
 
-    # 3. Synchronizacja przyrostowa pełnej serii czasowej (opcjonalna)
-    if download_historical_series:
-        sync_sentinel2_time_series(
-            aoi=aoi,
-            start_year=baseline_years[0],
-            end_year=datetime.now().year,
-            output_dir=dir_s2,
-            epsg_code=epsg_code
-        )
-
-    # 4. Wybór bieżącej sceny Sentinel-2 dla zadanego dnia (+/- 7 dni w razie chmur)
+    # 3. Wybor biezacej sceny Sentinel-2 dla zadanego dnia (+/- 7 dni w razie chmur)
     target_dt = datetime.strptime(target_date[:10], "%Y-%m-%d")
     s2_start = (target_dt - timedelta(days=7)).strftime("%Y-%m-%d")
     s2_end = (target_dt + timedelta(days=7)).strftime("%Y-%m-%d")
@@ -890,9 +1226,9 @@ def ingest_satellite_data(
         s2_end = (target_dt + timedelta(days=15)).strftime("%Y-%m-%d")
         s2_col = get_s2_sr_cld_collection(aoi, s2_start, s2_end, cloud_thresh=70)
         if s2_col.size().getInfo() == 0:
-            raise RuntimeError(f"Nie znaleziono żadnej sceny Sentinel-2 dla obszaru w oknie {s2_start} do {s2_end}.")
+            raise RuntimeError(f"Nie znaleziono zadnej sceny Sentinel-2 dla obszaru w oknie {s2_start} do {s2_end}.")
 
-    # Wybór sceny o najmniejszym zachmurzeniu DOKŁADNIE NAD NASZYMI DZIAŁKAMI (AOI)
+    # Wybor sceny o najmniejszym zachmurzeniu DOKLADNIE NAD NASZYMI DZIALKAMI (AOI)
     best_s2 = s2_col.sort('AOI_CLOUD_PERCENTAGE').first()
     best_id = best_s2.get('system:index').getInfo()
     cloud_pct = best_s2.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
@@ -900,108 +1236,113 @@ def ingest_satellite_data(
     time_start_ms = best_s2.get('system:time_start').getInfo()
     actual_date_str = datetime.utcfromtimestamp(time_start_ms / 1000.0).strftime('%Y-%m-%d')
     logger.info(
-        f"Wybrano scenę S2: {best_id} (data akwizycji: {actual_date_str}, "
-        f"zachmurzenie nad działkami AOI: {aoi_cloud:.1f}%, cała scena: {cloud_pct:.1f}%)"
+        f"Wybrano scene S2: {best_id} (data akwizycji: {actual_date_str}, "
+        f"zachmurzenie nad dzialkami AOI: {aoi_cloud:.1f}%, cala scena: {cloud_pct:.1f}%)"
     )
 
     # Przygotowanie obrazu S2 ze skalowaniem BOA -> [0.0, 1.0]
     s2_processed = prepare_s2_scaled_image(best_s2)
 
-    # 5. Pobranie bieżącej sceny termicznej LST (1 km)
+    # 4. Pobranie biezacej sceny termicznej LST (1 km)
     lst_image = get_thermal_lst_1km(aoi, actual_date_str)
 
-    # 6. Pobranie numerycznego modelu terenu Copernicus DEM GLO-30 (30 m)
+    # 5. Pobranie numerycznego modelu terenu Copernicus DEM GLO-30 (30 m)
     dem_image = get_copernicus_dem_glo30(aoi)
 
-    # 7. Obliczenie wieloletnich statystyk referencyjnych w GEE
+    # 6. Obliczenie wieloletnich statystyk referencyjnych w GEE
     baseline_stats_image = compute_historical_baseline_stats(
         aoi=aoi,
         target_date_str=actual_date_str,
         baseline_years=baseline_years
     )
 
-    # 8. Pobranie CGLS SWI T=5 (1 km) oraz HR-VPP ST PPI (10 m)
-    swi_image = get_cgls_soil_water_index(aoi, actual_date_str)
-    ppi_image = get_hrvpp_seasonal_trajectory_ppi(aoi, actual_date_str, fallback_s2=best_s2)
-
-    # 9. Eksport rastrow do plikow lokalnych GeoTIFF
+    # 7. Eksport rastrow z GEE do plikow lokalnych GeoTIFF
     s2_tif_path = os.path.join(dir_s2, f"S2_L2A_{actual_date_str}.tif")
     lst_tif_path = os.path.join(dir_lst, f"LST_1km_{actual_date_str}.tif")
     dem_tif_path = os.path.join(dir_aux, "Copernicus_DEM_GLO30_10m.tif")
     base_tif_path = os.path.join(dir_aux, f"Baseline_Stats_{baseline_years[0]}_{baseline_years[1]}.tif")
-    swi_tif_path = os.path.join(dir_aux, f"CGLS_SWI_1km_{actual_date_str}.tif")
-    ppi_tif_path = os.path.join(dir_aux, f"HRVPP_PPI_10m_{actual_date_str}.tif")
 
-    # Pobieranie GeoTIFF z GEE
     export_image_robust(s2_processed, s2_tif_path, region=aoi, scale=10.0, crs=f'EPSG:{epsg_code}')
     export_image_robust(lst_image, lst_tif_path, region=aoi, scale=1000.0, crs=f'EPSG:{epsg_code}')
     export_image_robust(dem_image, dem_tif_path, region=aoi, scale=10.0, crs=f'EPSG:{epsg_code}')
     export_image_robust(baseline_stats_image, base_tif_path, region=aoi, scale=10.0, crs=f'EPSG:{epsg_code}')
-    export_image_robust(swi_image, swi_tif_path, region=aoi, scale=1000.0, crs=f'EPSG:{epsg_code}')
-    export_image_robust(ppi_image, ppi_tif_path, region=aoi, scale=10.0, crs=f'EPSG:{epsg_code}')
 
-    # 10. Wczytanie do tablic NumPy i przygotowanie profilu Rasterio
+    # 8. Wczytanie profilu 10m i wyznaczenie obwiedni w ukladzie UTM
     s2_raw_arr, profile_10m = read_geotiff_to_numpy(s2_tif_path)
+    minx, miny, maxx, maxy = rasterio.transform.array_bounds(
+        profile_10m['height'], profile_10m['width'], profile_10m['transform']
+    )
+    bounds_utm = [minx, miny, maxx, maxy]
 
-    # Defensywne zabezpieczenie przed awaria pobierania warstw pomocniczych (fail-safe)
-    if not os.path.exists(dem_tif_path):
-        logger.warning(f"Brak pliku DEM {dem_tif_path}. Generowanie numerycznego modelu terenu (plaskowyz 145m)...")
-        dem_prof = profile_10m.copy()
-        dem_prof.update(count=1, dtype='float32')
-        with rasterio.open(dem_tif_path, 'w', **dem_prof) as dst:
-            dst.write(np.full((profile_10m['height'], profile_10m['width']), 145.0, dtype=np.float32), 1)
+    # 9. Pobranie CGLS SWI (8 glebokosci) oraz HR-VPP ST (PPI + QFLAG 10m) z oficjalnego API Copernicus CDSE
+    swi_tif_path = os.path.join(dir_swi, f"CGLS_SWI_8depths_{actual_date_str}.tif")
+    hrvpp_tif_path = os.path.join(dir_hrvpp, f"CLMS_HRVPP_ST_10m_{actual_date_str}.tif")
 
-    if not os.path.exists(lst_tif_path):
-        logger.warning(f"Brak pliku LST {lst_tif_path}. Generowanie zastepczej temperatury powierzchni (28.0 C)...")
-        lst_prof = profile_10m.copy()
-        lst_prof.update(count=1, dtype='float32')
-        with rasterio.open(lst_tif_path, 'w', **lst_prof) as dst:
-            dst.write(np.full((profile_10m['height'], profile_10m['width']), 28.0, dtype=np.float32), 1)
+    fetch_cdse_swi_multidepth(
+        bounds_utm=bounds_utm,
+        profile_10m=profile_10m,
+        target_date_str=actual_date_str,
+        output_path=swi_tif_path,
+        client_id=cdse_client_id,
+        client_secret=cdse_client_secret
+    )
 
-    if not os.path.exists(base_tif_path):
-        logger.warning(f"Brak pliku statystyk bazowych {base_tif_path}. Generowanie referencyjnych statystyk wieloletnich...")
-        base_prof = profile_10m.copy()
-        base_prof.update(count=4, dtype='float32')
-        with rasterio.open(base_tif_path, 'w', **base_prof) as dst:
-            dst.write(np.full((profile_10m['height'], profile_10m['width']), 0.08, dtype=np.float32), 1)
-            dst.write(np.full((profile_10m['height'], profile_10m['width']), 0.02, dtype=np.float32), 2)
-            dst.write(np.full((profile_10m['height'], profile_10m['width']), 0.65, dtype=np.float32), 3)
-            dst.write(np.full((profile_10m['height'], profile_10m['width']), 0.05, dtype=np.float32), 4)
+    fetch_cdse_hrvpp_st(
+        bounds_utm=bounds_utm,
+        profile_10m=profile_10m,
+        target_date_str=actual_date_str,
+        output_path=hrvpp_tif_path,
+        client_id=cdse_client_id,
+        client_secret=cdse_client_secret
+    )
 
-    if not os.path.exists(swi_tif_path):
-        logger.warning(f"Brak pliku SWI {swi_tif_path}. Generowanie regionalnego tla wilgotnosci gleby (SWI = 38.0%)...")
-        swi_prof = profile_10m.copy()
-        swi_prof.update(count=1, dtype='float32')
-        with rasterio.open(swi_tif_path, 'w', **swi_prof) as dst:
-            dst.write(np.full((profile_10m['height'], profile_10m['width']), 38.0, dtype=np.float32), 1)
+    # 10. Synchronizacja przyrostowa pelnej serii czasowej 2016-dzis (opcjonalna)
+    if download_historical_series:
+        manifest_path = os.path.join(output_base_dir, "00_Metadata", "ingest_manifest.json")
+        logger.info("Uruchamianie pelnej synchronizacji przyrostowej bazy danych 2016-dzis...")
+        sync_sentinel2_time_series(
+            aoi=aoi,
+            start_year=baseline_years[0],
+            end_year=datetime.now().year,
+            output_dir=dir_s2,
+            manifest_path=manifest_path,
+            epsg_code=epsg_code
+        )
+        sync_cdse_swi_time_series(
+            bounds_utm=bounds_utm,
+            profile_10m=profile_10m,
+            start_year=baseline_years[0],
+            end_year=datetime.now().year,
+            output_dir=dir_swi,
+            manifest_path=manifest_path,
+            client_id=cdse_client_id,
+            client_secret=cdse_client_secret
+        )
+        sync_cdse_hrvpp_time_series(
+            bounds_utm=bounds_utm,
+            profile_10m=profile_10m,
+            start_year=max(2017, baseline_years[0]),
+            end_year=datetime.now().year,
+            output_dir=dir_hrvpp,
+            manifest_path=manifest_path,
+            client_id=cdse_client_id,
+            client_secret=cdse_client_secret
+        )
 
-    if not os.path.exists(ppi_tif_path):
-        logger.warning(f"Brak pliku PPI {ppi_tif_path}. Obliczanie PPI bezposrednio z pasm Sentinel-2...")
-        try:
-            b4 = s2_raw_arr[2, :, :] / REFLECTANCE_SCALE_FACTOR if np.nanmax(s2_raw_arr[2, :, :]) > 10.0 else s2_raw_arr[2, :, :]
-            b8 = s2_raw_arr[6, :, :] / REFLECTANCE_SCALE_FACTOR if np.nanmax(s2_raw_arr[6, :, :]) > 10.0 else s2_raw_arr[6, :, :]
-            dvi = np.clip(b8 - b4, 0.091, 0.84)
-            ppi_calc = (-0.4 * np.log((0.85 - dvi) / 0.76)).astype(np.float32)
-        except Exception:
-            ppi_calc = np.full((profile_10m['height'], profile_10m['width']), 0.45, dtype=np.float32)
-        ppi_prof = profile_10m.copy()
-        ppi_prof.update(count=1, dtype='float32')
-        with rasterio.open(ppi_tif_path, 'w', **ppi_prof) as dst:
-            dst.write(ppi_calc, 1)
-
+    # 11. Wczytanie wszystkich rastrow do tablic NumPy
     dem_arr, _ = read_geotiff_to_numpy(dem_tif_path)
     lst_arr, _ = read_geotiff_to_numpy(lst_tif_path)
     base_arr, _ = read_geotiff_to_numpy(base_tif_path)
     swi_arr, _ = read_geotiff_to_numpy(swi_tif_path)
-    ppi_arr, _ = read_geotiff_to_numpy(ppi_tif_path)
+    hrvpp_arr, _ = read_geotiff_to_numpy(hrvpp_tif_path)
 
-    # Generowanie binarnej maski upraw trwałych M_crop (HRL Croplands 10 m)
+    # Generowanie binarnej maski upraw trwalych M_crop (HRL Croplands 10 m)
     crop_mask = get_hrl_crop_mask(geojson_path, profile_10m)
     crop_mask_path = os.path.join(dir_aux, "HRL_Crop_Mask_10m.tif")
     with rasterio.open(crop_mask_path, 'w', **profile_10m) as dst:
         dst.write(np.nan_to_num(crop_mask, nan=-9999.0).astype(np.float32), 1)
 
-    # Budowa słownika s2_bands_dict
+    # Budowa slownika s2_bands_dict
     s2_bands_dict: Dict[str, np.ndarray] = {}
     for idx, band_name in enumerate(REQUIRED_S2_BANDS):
         band_data = s2_raw_arr[idx, :, :]
@@ -1009,14 +1350,21 @@ def ingest_satellite_data(
             band_data = band_data / REFLECTANCE_SCALE_FACTOR
         s2_bands_dict[band_name] = band_data.astype(np.float32)
 
-    # Dołączenie LST, DEM, M_crop, SWI T=5 oraz PPI do słownika zwracanego
+    # Dolaczenie LST, DEM, M_crop, SWI oraz HR-VPP do slownika zwracanego
     s2_bands_dict["s3_lst_raw"] = lst_arr[0, :, :].astype(np.float32) if len(lst_arr.shape) == 3 else lst_arr.astype(np.float32)
     s2_bands_dict["dem"] = dem_arr[0, :, :].astype(np.float32) if len(dem_arr.shape) == 3 else dem_arr.astype(np.float32)
     s2_bands_dict["crop_mask"] = crop_mask.astype(np.float32)
-    s2_bands_dict["swi_1km"] = swi_arr[0, :, :].astype(np.float32) if len(swi_arr.shape) == 3 else swi_arr.astype(np.float32)
-    s2_bands_dict["ppi_10m"] = ppi_arr[0, :, :].astype(np.float32) if len(ppi_arr.shape) == 3 else ppi_arr.astype(np.float32)
 
-    # Wypełnienie słownika statystyk bazowych
+    # SWI: T=5 (strefa korzeniowa drzew) oraz pelny profil 8 glebokosci
+    s2_bands_dict["swi_1km"] = swi_arr[1, :, :].astype(np.float32)
+    s2_bands_dict["swi_profile_8depths"] = swi_arr.astype(np.float32)
+    s2_bands_dict["swi_depth_names"] = SWI_DEPTH_NAMES
+
+    # HR-VPP ST: PPI oraz QFLAG
+    s2_bands_dict["ppi_10m"] = hrvpp_arr[0, :, :].astype(np.float32)
+    s2_bands_dict["ppi_qflag"] = hrvpp_arr[1, :, :].astype(np.float32)
+
+    # Wypelnienie slownika statystyk bazowych
     baseline_stats_dict: Dict[str, np.ndarray] = {
         "tcari_osavi_mean": base_arr[0, :, :].astype(np.float32),
         "tcari_osavi_std": base_arr[1, :, :].astype(np.float32),
@@ -1025,31 +1373,32 @@ def ingest_satellite_data(
     }
 
     logger.info("================================================================================")
-    logger.info("KROK 1 ZAKOŃCZONY POMYŚLNIE:")
+    logger.info("KROK 1 ZAKONCZONY POMYSLNIE:")
     logger.info(f" - Rozmiar siatki 10m: {profile_10m['height']} x {profile_10m['width']} px")
-    logger.info(f" - Układ CRS: {profile_10m['crs']}")
+    logger.info(f" - Uklad CRS: {profile_10m['crs']}")
     logger.info(f" - Pasm S2 wczytanych: {len(REQUIRED_S2_BANDS)}")
-    logger.info(f" - Maska Upraw HRL M_crop: {np.nansum(crop_mask == 1.0)} pikseli upraw trwałych")
-    logger.info(f" - Regionalny SWI T=5: średnia {np.nanmean(s2_bands_dict['swi_1km']):.1f}%")
-    logger.info(f" - Trajektoria HR-VPP PPI: średnia {np.nanmean(s2_bands_dict['ppi_10m']):.3f}")
+    logger.info(f" - Maska Upraw HRL M_crop: {np.nansum(crop_mask == 1.0)} pikseli upraw trwalych")
+    logger.info(f" - Regionalny SWI T=5: srednia {np.nanmean(s2_bands_dict['swi_1km']):.1f}%")
+    logger.info(f" - Pelny profil CGLS SWI (8 glebokosci): {swi_arr.shape}")
+    logger.info(f" - Oficjalna trajektoria CLMS HR-VPP PPI: srednia {np.nanmean(s2_bands_dict['ppi_10m']):.3f}")
     logger.info(f" - Zakres temperatur LST: min={np.nanmin(s2_bands_dict['s3_lst_raw']):.1f}C, max={np.nanmax(s2_bands_dict['s3_lst_raw']):.1f}C")
-    logger.info(f" - Zakres wysokości DEM: min={np.nanmin(s2_bands_dict['dem']):.1f}m, max={np.nanmax(s2_bands_dict['dem']):.1f}m")
+    logger.info(f" - Zakres wysokosci DEM: min={np.nanmin(s2_bands_dict['dem']):.1f}m, max={np.nanmax(s2_bands_dict['dem']):.1f}m")
     logger.info("================================================================================")
 
     return s2_bands_dict, profile_10m, baseline_stats_dict
 
 
 # ==============================================================================
-# TEST SAMODZIELNY MODUŁU
+# TEST SAMODZIELNY MODULU
 # ==============================================================================
 if __name__ == "__main__":
-    print("Testowanie modułu step_01_ingest.py...")
+    print("Testowanie modulu step_01_ingest.py...")
     try:
         bands, profile, baseline = ingest_satellite_data(
             target_date="2023-07-15",
             geojson_path="data/1_AOI_GBOV_CONDOM.geojson",
             download_historical_series=False
         )
-        print(" Sukces! Wymiary B04:", bands["B04"].shape)
+        print("[OK] Sukces! Wymiary B04:", bands["B04"].shape)
     except Exception as err:
         print(f"Informacja: Test wymaga aktywnej sesji Google Earth Engine: {err}")

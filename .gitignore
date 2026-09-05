@@ -32,10 +32,16 @@ data/05_Final_Outputs/*
 *.tar.gz
 *.zip
 
-# Środowisko i klucze
+# Srodowisko i klucze
 .env
+.env.*
 *.token
+*.key
+*.secret
+secrets*
 credentials.json
+.cdse*
+*.credentials
 
 # IDE / System
 .vscode/
