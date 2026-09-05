@@ -1,7 +1,11 @@
 # S-3/S-2 AgriScreen DSS v2.5
 ### System Wczesnego Wykrywania Anomalii Wilgotnościowych i Fizjologicznych w Uprawach Wieloletnich
 
+[![GitHub Repo](https://img.shields.io/badge/GitHub-geoworldlook%2F1__geoworldlook--agriscreen-blue?logo=github)](https://github.com/geoworldlook/1_geoworldlook-agriscreen)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/geoworldlook/1_geoworldlook-agriscreen/blob/main/AgriScreen_Colab_Master.ipynb)
+
 Potok przetwarzania teledetekcyjnego w języku **Python 3.10+**, zoptymalizowany pod środowisko **Google Colab (GPU T4, 12 GB RAM)** oraz chmurowy silnik **Google Earth Engine (GEE)**.
+Dane i gotowe produkty GeoTIFF przechowywane są trwale na **Dysku Google** (`/content/drive/MyDrive/1_geoworldlook-agriscreen`).
 
 System analizuje rzeczywiste dane satelitarne dla upraw wieloletnich (sady owocowe, winnice) w rejonie poligonu badawczego **GBOV Condom (Gers, Francja)** zdefiniowanego w pliku [`data/1_AOI_GBOV_CONDOM.geojson`](file:///c:/Users/dawids/OneDrive%20-%20opegieka.pl/Pulpit/OneDrive%20-%20opegieka.pl/Pulpit/DAWID/GEOWORLDLOOK/2_geoworldlook/data/1_AOI_GBOV_CONDOM.geojson).
 
