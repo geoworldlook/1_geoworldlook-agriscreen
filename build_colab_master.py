@@ -64,11 +64,11 @@ except Exception:
     print('ℹ️ Uruchomienie lokalne poza Google Colab.')
 
 # 2. Automatyczne wykrycie lub ręczne wskazanie katalogu projektu na Dysku Google
-# Dostosuj poniższą listę ścieżek, jeśli Twój folder na Dysku Google ma inną nazwę:
+REPO_URL = 'https://github.com/geoworldlook/1_geoworldlook-agriscreen.git'
 CANDIDATE_PATHS = [
-    '/content/drive/MyDrive/GEOWORLDLOOK_AgriScreen',
+    '/content/drive/MyDrive/1_geoworldlook-agriscreen',
     '/content/drive/MyDrive/2_geoworldlook',
-    '/content/drive/MyDrive/GEOWORLDLOOK/2_geoworldlook',
+    '/content/drive/MyDrive/GEOWORLDLOOK_AgriScreen',
     os.path.abspath('.')
 ]
 
@@ -79,8 +79,13 @@ for candidate in CANDIDATE_PATHS:
         break
 
 if PROJECT_DIR is None:
-    # Wskaż ręcznie ścieżkę do katalogu projektu na Dysku Google:
-    PROJECT_DIR = '/content/drive/MyDrive/2_geoworldlook'
+    # Domyślny katalog na Dysku Google
+    PROJECT_DIR = '/content/drive/MyDrive/1_geoworldlook-agriscreen'
+
+# Jeśli folder nie istnieje lub nie zawiera jeszcze kodu, sklonuj repozytorium:
+if not os.path.exists(os.path.join(PROJECT_DIR, 'step_01_ingest.py')):
+    print(f'📥 Klonowanie repozytorium GitHub do: {PROJECT_DIR}...')
+    !git clone {REPO_URL} "{PROJECT_DIR}"
 
 print(f'📂 Katalog roboczy projektu: {PROJECT_DIR}')
 
@@ -93,13 +98,10 @@ if PROJECT_DIR not in sys.path:
 %load_ext autoreload
 %autoreload 2
 
-# 5. Opcjonalne pobranie najnowszych zmian z GitHub na Dysk Google
+# 5. Pobranie najnowszych zmian z GitHub na Dysk Google
 if os.path.exists(os.path.join(PROJECT_DIR, '.git')):
     print('🔄 Wykryto repozytorium Git. Pobieranie najnowszych aktualizacji ze skryptów...')
     !git -C "{PROJECT_DIR}" pull
-else:
-    print('ℹ️ Jeśli chcesz automatycznie klonować/aktualizować projekt z Git, sklonuj repo poleceniem:')
-    print('   !git clone https://github.com/<USER>/<REPO>.git ' + PROJECT_DIR)
 
 # 6. Utworzenie wymaganej struktury katalogów na dane (jeśli jeszcze nie istnieją)
 dirs = [
