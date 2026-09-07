@@ -210,14 +210,18 @@ def run_pipeline(config: Dict[str, Any] = CONFIG) -> None:
     logger.info("================================================================================")
     logger.info(f"Parametry: Data={config['TARGET_DATE']}, AOI={config['GEOJSON_PATH']}, Bufor={config['BUFFER_M']}m")
 
-    # Automatyczne dostosowanie katalogu wyjściowego
+    # Automatyczne dostosowanie katalogu wyjściowego i katalogu danych
     output_dir = config.get("OUTPUT_DIR", "data/05_Final_Outputs")
+    data_dir = config.get("DATA_DIR", os.path.join(config.get("PROJECT_DIR", "."), "data"))
+
     # Jeśli podano ścieżkę do Dysku Google a nie ma /content/drive, użyj lokalnego katalogu
     if output_dir.startswith("/content/drive") and not os.path.exists("/content/drive"):
         logger.warning("Dysk Google nie jest zamontowany. Zmiana OUTPUT_DIR na 'data/05_Final_Outputs'.")
         output_dir = "data/05_Final_Outputs"
+        data_dir = "data"
 
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(data_dir, exist_ok=True)
     runtimes: Dict[str, float] = {}
 
     # --------------------------------------------------------------------------
@@ -232,16 +236,19 @@ def run_pipeline(config: Dict[str, Any] = CONFIG) -> None:
             buffer_m=config["BUFFER_M"],
             baseline_years=config["BASELINE_YEARS"],
             geojson_path=config.get("GEOJSON_PATH"),
+            output_base_dir=data_dir,
             download_historical_series=config.get("DOWNLOAD_HISTORICAL", False),
-            gee_project=config.get("GEE_PROJECT", "ee-geoworldlook")
+            gee_project=config.get("GEE_PROJECT", "ee-geoworldlook"),
+            cdse_client_id=config.get("CDSE_CLIENT_ID"),
+            cdse_client_secret=config.get("CDSE_CLIENT_SECRET")
         )
     except Exception as e:
         logger.error(f"Błąd wykonania Kroku 1 (Ingestia GEE): {e}")
         logger.info("Przełączanie na tryb awaryjny (weryfikacja lokalnych danych z GeoTIFF)...")
         # Próba wczytania danych z dysku jeśli zostały wcześniej pobrane
-        s2_path = os.path.join("data", "01_Raw_Sentinel2", f"S2_L2A_{config['TARGET_DATE']}.tif")
-        dem_path = os.path.join("data", "03_Copernicus_Auxiliary", "Copernicus_DEM_GLO30_10m.tif")
-        lst_path = os.path.join("data", "02_Raw_Thermal_LST", f"LST_1km_{config['TARGET_DATE']}.tif")
+        s2_path = os.path.join(data_dir, "01_Raw_Sentinel2", f"S2_L2A_{config['TARGET_DATE']}.tif")
+        dem_path = os.path.join(data_dir, "03_Copernicus_Auxiliary", "Copernicus_DEM_GLO30_10m.tif")
+        lst_path = os.path.join(data_dir, "02_Raw_Thermal_LST", f"LST_1km_{config['TARGET_DATE']}.tif")
 
         if os.path.exists(s2_path) and os.path.exists(dem_path):
             with rasterio.open(s2_path) as src:

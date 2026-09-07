@@ -66,29 +66,30 @@ except Exception:
 
 # 2. Automatyczne wykrycie lub ręczne wskazanie katalogu projektu na Dysku Google
 REPO_URL = 'https://github.com/geoworldlook/1_geoworldlook-agriscreen.git'
-CANDIDATE_PATHS = [
-    '/content/drive/MyDrive/1_geoworldlook-agriscreen',
-    '/content/drive/MyDrive/2_geoworldlook',
-    '/content/drive/MyDrive/GEOWORLDLOOK_AgriScreen',
-    os.path.abspath('.')
-]
 
-PROJECT_DIR = None
-for candidate in CANDIDATE_PATHS:
-    if os.path.exists(os.path.join(candidate, 'step_01_ingest.py')):
-        PROJECT_DIR = candidate
-        break
+if IN_COLAB and os.path.exists('/content/drive/MyDrive'):
+    # Na Google Colab priorytet maja wylacznie sciezki na Twoim Dysku Google (/content/drive/MyDrive/...)
+    CANDIDATE_PATHS = [
+        '/content/drive/MyDrive/1_geoworldlook-agriscreen',
+        '/content/drive/MyDrive/2_geoworldlook',
+        '/content/drive/MyDrive/GEOWORLDLOOK_AgriScreen',
+    ]
+    PROJECT_DIR = None
+    for candidate in CANDIDATE_PATHS:
+        if os.path.exists(os.path.join(candidate, 'step_01_ingest.py')):
+            PROJECT_DIR = candidate
+            break
+    if PROJECT_DIR is None:
+        PROJECT_DIR = '/content/drive/MyDrive/1_geoworldlook-agriscreen'
+else:
+    PROJECT_DIR = os.path.abspath('.')
 
-if PROJECT_DIR is None:
-    # Domyślny katalog na Dysku Google
-    PROJECT_DIR = '/content/drive/MyDrive/1_geoworldlook-agriscreen'
-
-# Jeśli folder nie istnieje lub nie zawiera jeszcze kodu, sklonuj repozytorium:
+# Jeśli folder nie istnieje lub nie zawiera jeszcze kodu, sklonuj repozytorium na Dysk Google:
 if not os.path.exists(os.path.join(PROJECT_DIR, 'step_01_ingest.py')):
-    print(f'[INFO] Klonowanie repozytorium GitHub do: {PROJECT_DIR}...')
+    print(f'[INFO] Klonowanie repozytorium GitHub bezpośrednio na Twój Dysk Google: {PROJECT_DIR}...')
     !git clone {REPO_URL} "{PROJECT_DIR}"
 
-print(f'[INFO] Katalog roboczy projektu: {PROJECT_DIR}')
+print(f'[INFO] Główny katalog projektu na Dysku Google: {PROJECT_DIR}')
 
 # 3. Ustawienie bieżącego katalogu roboczego i dodanie do sys.path (importy modułowe)
 os.chdir(PROJECT_DIR)
@@ -262,6 +263,8 @@ CONFIG = {
     'GEE_PROJECT': 'ee-geoworldlook',
     'CDSE_CLIENT_ID': cdse_id,
     'CDSE_CLIENT_SECRET': cdse_secret,
+    'PROJECT_DIR': PROJECT_DIR,
+    'DATA_DIR': os.path.join(PROJECT_DIR, 'data'),
     'GEOJSON_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM_ZASIEG.geojson'),
     'PARCELS_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM.geojson'),
     'OUTPUT_DIR': os.path.join(PROJECT_DIR, 'data', '05_Final_Outputs'),
@@ -317,11 +320,17 @@ s2_bands, profile_10m, baseline_stats = ingest_satellite_data(
     buffer_m=CONFIG['BUFFER_M'],
     baseline_years=CONFIG['BASELINE_YEARS'],
     geojson_path=CONFIG['GEOJSON_PATH'],
+    output_base_dir=CONFIG['DATA_DIR'],
     download_historical_series=CONFIG['DOWNLOAD_HISTORICAL'],
     gee_project=CONFIG.get('GEE_PROJECT', 'ee-geoworldlook'),
     cdse_client_id=CONFIG.get('CDSE_CLIENT_ID'),
     cdse_client_secret=CONFIG.get('CDSE_CLIENT_SECRET')
 )
+
+try:
+    os.sync()
+except Exception:
+    pass
 
 print('[OK] KROK 1 ZAKONCZONY POMYSLNIE:')
 print(f' - Pobrane pasma S2: {list(s2_bands.keys())}')
@@ -331,6 +340,12 @@ print(f' - Regionalny SWI T=5: {s2_bands["swi_1km"].shape}')
 print(f' - Profil glebowy CGLS SWI (8 glebokosci): {s2_bands["swi_profile_8depths"].shape}')
 print(f' - Trajektoria fenologiczna HR-VPP PPI: {s2_bands["ppi_10m"].shape}')
 print(f' - Profil CRS: {profile_10m["crs"]}')
+print(f'\\n[DYSK GOOGLE] Zweryfikowano pliki w: {CONFIG["DATA_DIR"]}')
+for sub in ['01_Raw_Sentinel2', '02_Raw_Thermal_LST', '03_Copernicus_Auxiliary']:
+    sub_path = os.path.join(CONFIG['DATA_DIR'], sub)
+    if os.path.exists(sub_path):
+        cnt = len([f for f in os.listdir(sub_path) if f.endswith('.tif')])
+        print(f'  - {sub}: {cnt} plikow GeoTIFF na Twoim Dysku Google')
 """)
 
     # 8. Moduł 2: Downscaling pyDMS
@@ -339,6 +354,7 @@ Subpikselowa korejestracja korelacji fazowej, korekta adiabatyczna do poziomu mo
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
 from step_02_align_and_scale import align_and_scale_lst
+from step_05_colab_run import write_cog_geotiff
 import matplotlib.pyplot as plt
 
 lst_10m = align_and_scale_lst(
@@ -347,6 +363,16 @@ lst_10m = align_and_scale_lst(
     dem=s2_bands['dem'],
     profile_10m=profile_10m
 )
+
+# Natychmiastowy zapis zaostrzonego LST 10m na Dysk Google
+os.makedirs(CONFIG['OUTPUT_DIR'], exist_ok=True)
+path_lst_out = os.path.join(CONFIG['OUTPUT_DIR'], 'LST_10m_sharpened.tif')
+write_cog_geotiff(lst_10m, profile_10m, path_lst_out)
+try:
+    os.sync()
+except Exception:
+    pass
+print(f'[OK] Zapisano wynikowy rastr LST 10m na Dysku Google: {path_lst_out}')
 
 # Porównanie surowego LST 1km vs zaostrzonego LST 10m
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
@@ -386,6 +412,7 @@ Obliczenie OSAVI, TCARI, TCARI/OSAVI na siatce 2.5 m, wskaźnika suszy TVDI (tr�
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
 from step_04_metrics_alert import compute_metrics_and_alerts
+from step_05_colab_run import write_cog_geotiff
 
 products, wald_metrics = compute_metrics_and_alerts(
     bands_25m=bands_25m,
@@ -393,6 +420,20 @@ products, wald_metrics = compute_metrics_and_alerts(
     baseline_stats=baseline_stats,
     profile_25m=profile_25m
 )
+
+# Natychmiastowy zapis finalnych produktow na Dysk Google
+path_tcari = os.path.join(CONFIG['OUTPUT_DIR'], 'TCARI_OSAVI_2.5m.tif')
+path_tvdi = os.path.join(CONFIG['OUTPUT_DIR'], 'TVDI_10m.tif')
+path_alert = os.path.join(CONFIG['OUTPUT_DIR'], 'Alert_Matrix_2.5m.tif')
+
+write_cog_geotiff(products['tcari_osavi_25m'], profile_25m, path_tcari)
+write_cog_geotiff(products['tvdi_10m'], profile_10m, path_tvdi)
+write_cog_geotiff(products['alert_mask_25m'], profile_25m, path_alert)
+try:
+    os.sync()
+except Exception:
+    pass
+print(f'[OK] Zapisano finalne mapy wskaźników i alertów na Twoim Dysku Google w: {CONFIG["OUTPUT_DIR"]}')
 
 print('[OK] Wyniki Walidacji Dokładności (Protokół Walda):')
 for k, v in wald_metrics.items():
