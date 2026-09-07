@@ -340,7 +340,9 @@ def get_thermal_lst_1km(
             s3_img = s3_col.sort('system:time_start').first()
             # Wybór pasma LST i przeliczenie K -> Celsjusz
             lst_k = s3_img.select(['LST', 'LST_in_celsius', 'temperature']).first()
-            return lst_k.clip(aoi).rename('LST_raw')
+            # Przeliczenie Kelvin -> Celsius (S3 SLSTR LST podawane jest w Kelvinach)
+            lst_celsius = ee.Image(lst_k).subtract(273.15).rename('LST_raw')
+            return lst_celsius
     except Exception as s3_err:
         logger.debug(f"Kolekcja COPERNICUS/S3/SLSTR niedostępna: {s3_err}. Użycie 1km MODIS LST.")
 
@@ -354,8 +356,11 @@ def get_thermal_lst_1km(
     if count > 0:
         logger.info(f"Pobieranie 1 km LST z MODIS MOD11A1 (znaleziono {count} scen w oknie +/-24h).")
         # Skalowanie: DN * 0.02 = Kelvin, Kelvin - 273.15 = stopnie Celsjusza
+        # Prawidlowy zakres MOD11A1 LST_Day_1km to DN > 7500 (T > 150K)
         modis_img = modis_col.sort('system:time_start').first()
-        lst_celsius = modis_img.select('LST_Day_1km').multiply(0.02).subtract(273.15).clip(aoi).rename('LST_raw')
+        modis_raw = modis_img.select('LST_Day_1km')
+        modis_valid = modis_raw.gt(7500)
+        lst_celsius = modis_raw.updateMask(modis_valid).multiply(0.02).subtract(273.15).rename('LST_raw')
         return lst_celsius
     else:
         # Fallback na ERA5-Land hourly skin temperature (1 km zresamplowane)
@@ -367,7 +372,6 @@ def get_thermal_lst_1km(
             .select('skin_temperature')
             .mean()
             .subtract(273.15)
-            .clip(aoi)
             .rename('LST_raw')
         )
         return era5

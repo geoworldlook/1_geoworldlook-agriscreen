@@ -348,14 +348,15 @@ for sub in ['01_Raw_Sentinel2', '02_Raw_Thermal_LST', '03_Copernicus_Auxiliary']
         print(f'  - {sub}: {cnt} plikow GeoTIFF na Twoim Dysku Google')
 """)
 
-    # 8. Moduł 2: Downscaling pyDMS
-    add_md("""## MODUŁ 2: Korejestracja AROSICS i Downscaling Termiczny pyDMS (`step_02_align_and_scale.py`)
-Subpikselowa korejestracja korelacji fazowej, korekta adiabatyczna do poziomu morza ($LST + 0.006 \cdot DEM$), deagregacja pyDMS (bagging drzew z cechami NDVI i DEM), kompensacja reszt Gaussa i przywrócenie temperatury fizycznej.""")
+    # 8. Moduł 2: Downscaling H-pyDMS
+    add_md("""## MODUŁ 2: Korejestracja AROSICS i Hybrydowy Downscaling Termiczny H-pyDMS / TsHARP (`step_02_align_and_scale.py`)
+Subpikselowa korejestracja fazowa AROSICS, ekstrakcja cech wielospektralnych 10 m (NDVI, NDWI, Albedo Lianga, DEM, Slope), hybrydowy silnik deagregacji H-pyDMS (Random Forest dla obszarów regionalnych oraz analityczny TsHARP/DisTrad dla mikropoligonów z małą próbą), kompensacja reszt Gaussa (100% zachowania bilansu energii radiacyjnej) oraz adiabatyczna korekta wysokościowa.""")
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
 from step_02_align_and_scale import align_and_scale_lst
 from step_05_colab_run import write_cog_geotiff
 import matplotlib.pyplot as plt
+import numpy as np
 
 lst_10m = align_and_scale_lst(
     s2_bands=s2_bands,
@@ -375,13 +376,14 @@ except Exception:
 print(f'[OK] Zapisano wynikowy rastr LST 10m na Dysku Google: {path_lst_out}')
 
 # Porównanie surowego LST 1km vs zaostrzonego LST 10m
+lst_coarse_disp = s2_bands['s3_lst_raw'] - 273.15 if np.nanmean(s2_bands['s3_lst_raw']) > 150.0 else s2_bands['s3_lst_raw']
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-im0 = axes[0].imshow(s2_bands['s3_lst_raw'], cmap='inferno')
-axes[0].set_title('Surowe LST Coarse (1 km)')
+im0 = axes[0].imshow(lst_coarse_disp, cmap='inferno')
+axes[0].set_title(f'Surowe LST Coarse (1 km) [{np.nanmin(lst_coarse_disp):.1f}C - {np.nanmax(lst_coarse_disp):.1f}C]')
 plt.colorbar(im0, ax=axes[0], label='Temperatura [°C]')
 
 im1 = axes[1].imshow(lst_10m, cmap='inferno')
-axes[1].set_title('Zaostrzone LST pyDMS (10 m)')
+axes[1].set_title(f'Zaostrzone LST H-pyDMS (10 m) [{np.nanmin(lst_10m):.1f}C - {np.nanmax(lst_10m):.1f}C]')
 plt.colorbar(im1, ax=axes[1], label='Temperatura [°C]')
 plt.tight_layout()
 plt.show()
