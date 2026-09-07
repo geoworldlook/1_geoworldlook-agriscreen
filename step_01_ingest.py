@@ -745,7 +745,14 @@ def sync_cdse_swi_time_series(
         dt_str = dt.strftime("%Y-%m-%d")
         fn = f"CGLS_SWI_8depths_{dt_str}.tif"
         fp = os.path.join(output_dir, fn)
-        if dt_str in downloaded_swi and os.path.exists(fp) and os.path.getsize(fp) > 1024:
+        if os.path.exists(fp) and os.path.getsize(fp) > 1024:
+            if dt_str not in downloaded_swi:
+                downloaded_swi[dt_str] = {
+                    "filepath": fp,
+                    "downloaded_at": datetime.now().isoformat()
+                }
+                with open(manifest_path, "w", encoding="utf-8") as mf:
+                    json.dump(manifest, mf, indent=2)
             downloaded_files.append(fp)
             continue
 
@@ -815,7 +822,14 @@ def sync_cdse_hrvpp_time_series(
         dt_str = dt.strftime("%Y-%m-%d")
         fn = f"CLMS_HRVPP_ST_10m_{dt_str}.tif"
         fp = os.path.join(output_dir, fn)
-        if dt_str in downloaded_hrvpp and os.path.exists(fp) and os.path.getsize(fp) > 1024:
+        if os.path.exists(fp) and os.path.getsize(fp) > 1024:
+            if dt_str not in downloaded_hrvpp:
+                downloaded_hrvpp[dt_str] = {
+                    "filepath": fp,
+                    "downloaded_at": datetime.now().isoformat()
+                }
+                with open(manifest_path, "w", encoding="utf-8") as mf:
+                    json.dump(manifest, mf, indent=2)
             downloaded_files.append(fp)
             continue
 
@@ -1113,8 +1127,18 @@ def sync_sentinel2_time_series(
         }
         scenes_summary.append(scene_meta)
 
-        # Sprawdzenie czy scena już została pobrana
-        if scene_id in downloaded_keys and os.path.exists(filepath) and os.path.getsize(filepath) > 1024:
+        # Sprawdzenie czy scena juz istnieje na dysku (pamiec podreczna)
+        if os.path.exists(filepath) and os.path.getsize(filepath) > 1024:
+            if scene_id not in downloaded_keys:
+                manifest["downloaded_scenes"][scene_id] = {
+                    "filepath": filepath,
+                    "timestamp": dt_str,
+                    "cloud_percentage": cloud_pct,
+                    "downloaded_at": datetime.now().isoformat()
+                }
+                downloaded_keys.add(scene_id)
+                with open(manifest_path, 'w', encoding='utf-8') as mf:
+                    json.dump(manifest, mf, indent=2)
             continue
 
         # Przygotowanie obrazu ze wszystkimi 10 pasmami + maska chmur
@@ -1150,7 +1174,11 @@ def sync_sentinel2_time_series(
                 json.dump(manifest, mf, indent=2)
             new_downloads += 1
 
-    logger.info(f"Synchronizacja S2 zakończona. Pobrano nowych scen: {new_downloads}. Wszystkich dostępnych: {len(scenes_summary)}.")
+    cached_count = len(scenes_summary) - new_downloads
+    logger.info(
+        f"Synchronizacja S2 zakonczona. Wszystkich scen: {len(scenes_summary)} "
+        f"({cached_count} juz na dysku, {new_downloads} nowo pobranych)."
+    )
     return scenes_summary
 
 
