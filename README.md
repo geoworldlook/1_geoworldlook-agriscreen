@@ -23,15 +23,17 @@ Struktura katalogów została zaprojektowana zgodnie z wymogiem płaskiej strukt
 │   ├── 00_Metadata/                   # Manifest pobranych scen (ingest_manifest.json)
 │   ├── 01_Raw_Sentinel2/              # Pobrane sceny S2 L2A (10 pasm + maska chmur)
 │   ├── 02_Raw_Thermal_LST/            # Dane termalne LST 1km (S3 SLSTR / Copernicus Thermal)
-│   ├── 03_Copernicus_Auxiliary/       # Copernicus DEM GLO-30 oraz Copernicus Land Cover
-│   ├── 04_Processed_Intermediates/    # Dane pośrednie
-│   └── 05_Final_Outputs/              # Gotowe COG GeoTIFF i raporty walidacyjne
+│   ├── 03_Copernicus_Auxiliary/       # Copernicus DEM GLO-30, CGLS SWI 8 poziomów, CLMS HR-VPP ST
+│   ├── 04_Upscaled_LST_10m/           # Wynikowe rastry LST po upscalingu 10m (H-pyDMS / TsHARP)
+│   ├── 05_Final_Outputs/              # Gotowe COG GeoTIFF (2.5m), alerty i raporty walidacyjne
+│   └── 06_Landsat_Validation/         # Referencyjne dane Landsat 30m, mapy reszt i raporty walidacji
 │
-├── step_01_ingest.py                  # Moduł 1: Ingestia GEE, S2 L2A, S3 LST, DEM i bazy 2018-2025
-├── step_02_align_and_scale.py         # Moduł 2: Korejestracja AROSICS i deagregacja pyDMS (1km -> 10m)
-├── step_03_super_resolve.py           # Moduł 3: SEN2SR 2.5m (RGBN) i fuzja geostatystyczna ATPRK (20m, LST)
+├── step_01_ingest.py                  # Moduł 1: Ingestia GEE, CDSE API (SWI 8-depths, HR-VPP PPI)
+├── step_02_align_and_scale.py         # Moduł 2: Korejestracja AROSICS i deagregacja H-pyDMS (1km -> 10m)
+├── step_03_super_resolve.py           # Moduł 3: SEN2SR 2.5m (RGBN) i fuzja geostatystyczna ATPRK
 ├── step_04_metrics_alert.py           # Moduł 4: Wskaźniki TCARI/OSAVI, TVDI, Z-score i Protokół Walda
 ├── step_05_colab_run.py               # Moduł 5: Master Orchestrator potoku
+├── step_06_landsat_validation.py      # Moduł 6: Walidacja Landsat 8/9 ST (30m) i analiza błędów
 │
 ├── test_pipeline.py                   # Skrypt testowy integracji modułów i odporności numerycznej
 ├── notebooks/

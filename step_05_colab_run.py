@@ -320,6 +320,10 @@ def run_pipeline(config: Dict[str, Any] = CONFIG) -> None:
     logger.info("Zapisywanie finalnych produktów Cloud-Optimized GeoTIFF...")
 
     path_lst = os.path.join(output_dir, "LST_10m_sharpened.tif")
+    dir_upscaled = os.path.join(data_dir, "04_Upscaled_LST_10m")
+    os.makedirs(dir_upscaled, exist_ok=True)
+    path_lst_dated = os.path.join(dir_upscaled, f"LST_10m_{config['TARGET_DATE']}.tif")
+
     path_tcari = os.path.join(output_dir, "TCARI_OSAVI_2.5m.tif")
     path_tvdi = os.path.join(output_dir, "TVDI_10m.tif")
     path_alert = os.path.join(output_dir, "Alert_Matrix_2.5m.tif")
@@ -327,6 +331,7 @@ def run_pipeline(config: Dict[str, Any] = CONFIG) -> None:
     path_ppi = os.path.join(output_dir, "HRVPP_PPI_2.5m.tif")
 
     write_cog_geotiff(lst_10m, profile_10m, path_lst)
+    write_cog_geotiff(lst_10m, profile_10m, path_lst_dated)
     write_cog_geotiff(products["tcari_osavi_25m"], profile_25m, path_tcari)
     write_cog_geotiff(products["tvdi_10m"], profile_10m, path_tvdi)
     write_cog_geotiff(products["alert_mask_25m"], profile_25m, path_alert)

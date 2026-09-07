@@ -119,8 +119,9 @@ dirs = [
     'data/01_Raw_Sentinel2',
     'data/02_Raw_Thermal_LST',
     'data/03_Copernicus_Auxiliary',
-    'data/04_Processed_Intermediates',
-    'data/05_Final_Outputs'
+    'data/04_Upscaled_LST_10m',
+    'data/05_Final_Outputs',
+    'data/06_Landsat_Validation'
 ]
 for d in dirs:
     os.makedirs(os.path.join(PROJECT_DIR, d), exist_ok=True)
@@ -341,7 +342,7 @@ print(f' - Profil glebowy CGLS SWI (8 glebokosci): {s2_bands["swi_profile_8depth
 print(f' - Trajektoria fenologiczna HR-VPP PPI: {s2_bands["ppi_10m"].shape}')
 print(f' - Profil CRS: {profile_10m["crs"]}')
 print(f'\\n[DYSK GOOGLE] Zweryfikowano pliki w: {CONFIG["DATA_DIR"]}')
-for sub in ['01_Raw_Sentinel2', '02_Raw_Thermal_LST', '03_Copernicus_Auxiliary']:
+for sub in ['01_Raw_Sentinel2', '02_Raw_Thermal_LST', '03_Copernicus_Auxiliary', '04_Upscaled_LST_10m', '05_Final_Outputs', '06_Landsat_Validation']:
     sub_path = os.path.join(CONFIG['DATA_DIR'], sub)
     if os.path.exists(sub_path):
         cnt = len([f for f in os.listdir(sub_path) if f.endswith('.tif')])
@@ -365,7 +366,12 @@ lst_10m = align_and_scale_lst(
     profile_10m=profile_10m
 )
 
-# Natychmiastowy zapis zaostrzonego LST 10m na Dysk Google
+# Natychmiastowy zapis zaostrzonego LST 10m w dedykowanym folderze na Dysku Google
+dir_upscaled = os.path.join(CONFIG['DATA_DIR'], '04_Upscaled_LST_10m')
+os.makedirs(dir_upscaled, exist_ok=True)
+path_lst_10m_date = os.path.join(dir_upscaled, f"LST_10m_{CONFIG['TARGET_DATE']}.tif")
+write_cog_geotiff(lst_10m, profile_10m, path_lst_10m_date)
+
 os.makedirs(CONFIG['OUTPUT_DIR'], exist_ok=True)
 path_lst_out = os.path.join(CONFIG['OUTPUT_DIR'], 'LST_10m_sharpened.tif')
 write_cog_geotiff(lst_10m, profile_10m, path_lst_out)
@@ -373,7 +379,8 @@ try:
     os.sync()
 except Exception:
     pass
-print(f'[OK] Zapisano wynikowy rastr LST 10m na Dysku Google: {path_lst_out}')
+print(f'[OK] Zapisano wynikowy rastr LST 10m w dedykowanym katalogu: {path_lst_10m_date}')
+print(f'[OK] Zapisano kopię w katalogu wyjściowym: {path_lst_out}')
 
 # Porównanie surowego LST 1km vs zaostrzonego LST 10m
 lst_coarse_disp = s2_bands['s3_lst_raw'] - 273.15 if np.nanmean(s2_bands['s3_lst_raw']) > 150.0 else s2_bands['s3_lst_raw']
