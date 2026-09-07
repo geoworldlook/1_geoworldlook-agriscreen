@@ -20,6 +20,7 @@ ekstrakcję i pobieranie rzeczywistych danych satelitarnych:
 import os
 import sys
 import json
+import re
 import time
 import random
 import logging
@@ -1153,6 +1154,101 @@ def sync_sentinel2_time_series(
     return scenes_summary
 
 
+def sync_thermal_lst_time_series(
+    aoi: ee.Geometry,
+    output_dir: str = "data/02_Raw_Thermal_LST",
+    s2_dir: str = "data/01_Raw_Sentinel2",
+    manifest_path: str = "data/00_Metadata/ingest_manifest.json",
+    target_dates: Optional[List[str]] = None,
+    epsg_code: int = 32631,
+    scale: float = 1000.0,
+    max_retries: int = 4
+) -> List[str]:
+    """
+    Przyrostowa synchronizacja wieloletniej serii czasowej LST (1 km) zbieznej ze scenami Sentinel-2.
+    Wyszukuje wszystkie daty pozyskanych scen S2 (z manifestu JSON oraz plikow w s2_dir)
+    i pobiera odpowiadajace sceny LST 1 km (Sentinel-3 SLSTR / MODIS LST) z Google Earth Engine.
+    Weryfikuje istnienie plikow na dysku, pomijajac te juz pobrane.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+
+    manifest: Dict[str, Any] = {}
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as mf:
+                manifest = json.load(mf)
+        except Exception:
+            manifest = {}
+    downloaded_lst = manifest.setdefault("downloaded_lst", {})
+
+    # Zbieranie unikalnych dat w formacie YYYY-MM-DD
+    dates_set = set()
+    if target_dates:
+        for td in target_dates:
+            dates_set.add(td[:10])
+
+    # 1. Odczyt z manifestu pobranych scen Sentinel-2
+    for sc_info in manifest.get("downloaded_scenes", {}).values():
+        ts = sc_info.get("timestamp", "")
+        if len(ts) >= 8 and ts[:8].isdigit():
+            dates_set.add(f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}")
+        elif len(ts) >= 10 and ts[4] == "-" and ts[7] == "-":
+            dates_set.add(ts[:10])
+
+    # 2. Odczyt bezposrednio z istniejacych plikow GeoTIFF w katalogu S2
+    if os.path.exists(s2_dir):
+        for fname in os.listdir(s2_dir):
+            if fname.endswith(".tif") and "S2_L2A" in fname:
+                m = re.search(r"(\d{4})[-_]?(\d{2})[-_]?(\d{2})", fname)
+                if m:
+                    dates_set.add(f"{m.group(1)}-{m.group(2)}-{m.group(3)}")
+
+    sorted_dates = sorted(list(dates_set))
+    logger.info(f"--- SYNCHRONIZACJA PRZYROSTOWA LST 1km: {len(sorted_dates)} terminow zbieznych z Sentinel-2 ---")
+    downloaded_files: List[str] = []
+
+    for dt_str in sorted_dates:
+        fn = f"LST_1km_{dt_str}.tif"
+        fp = os.path.join(output_dir, fn)
+
+        if dt_str in downloaded_lst and os.path.exists(fp) and os.path.getsize(fp) > 1024:
+            downloaded_files.append(fp)
+            continue
+        if os.path.exists(fp) and os.path.getsize(fp) > 1024:
+            downloaded_lst[dt_str] = {
+                "filepath": fp,
+                "downloaded_at": datetime.now().isoformat()
+            }
+            downloaded_files.append(fp)
+            continue
+
+        try:
+            logger.info(f"Pobieranie LST 1km dla daty Sentinel-2: {dt_str}...")
+            lst_image = get_thermal_lst_1km(aoi, dt_str)
+            success = export_image_robust(
+                image=lst_image,
+                path=fp,
+                region=aoi,
+                scale=scale,
+                crs=f"EPSG:{epsg_code}",
+                max_retries=max_retries
+            )
+            if success:
+                downloaded_lst[dt_str] = {
+                    "filepath": fp,
+                    "downloaded_at": datetime.now().isoformat()
+                }
+                with open(manifest_path, "w", encoding="utf-8") as mf:
+                    json.dump(manifest, mf, indent=2)
+                downloaded_files.append(fp)
+        except Exception as exc:
+            logger.warning(f"Pominiecie terminu LST {dt_str}: {exc}")
+
+    logger.info(f"Synchronizacja LST 1km zakonczona. Gotowych scen termicznych: {len(downloaded_files)}.")
+    return downloaded_files
+
+
 # ==============================================================================
 # VII. GŁÓWNA FUNKCJA KROKU 1: ingest_satellite_data
 # ==============================================================================
@@ -1319,6 +1415,13 @@ def ingest_satellite_data(
             start_year=baseline_years[0],
             end_year=datetime.now().year,
             output_dir=dir_s2,
+            manifest_path=manifest_path,
+            epsg_code=epsg_code
+        )
+        sync_thermal_lst_time_series(
+            aoi=aoi,
+            output_dir=dir_lst,
+            s2_dir=dir_s2,
             manifest_path=manifest_path,
             epsg_code=epsg_code
         )

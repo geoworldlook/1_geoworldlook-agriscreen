@@ -265,7 +265,7 @@ CONFIG = {
     'GEOJSON_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM_ZASIEG.geojson'),
     'PARCELS_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM.geojson'),
     'OUTPUT_DIR': os.path.join(PROJECT_DIR, 'data', '05_Final_Outputs'),
-    'DOWNLOAD_HISTORICAL': True  # Budowa wieloletniej bazy danych 2016-dzis (S2, CGLS SWI, CLMS HR-VPP)
+    'DOWNLOAD_HISTORICAL': True  # Budowa wieloletniej bazy danych 2016-dzis (S2, LST 1km, CGLS SWI, CLMS HR-VPP)
 }
 
 gdf_zasieg = gpd.read_file(CONFIG['GEOJSON_PATH'])
@@ -304,7 +304,7 @@ m
     # 7. Moduł 1: Ingestia
     add_md("""## MODUŁ 1: Ingestia Rzeczywistych Danych Satelitarnych i Bazy GEE/Copernicus (`step_01_ingest.py`)
 Pobiera w modelu hybrydowym:
-- Z GEE: Sentinel-2 L2A (10 pasm BOA z maska s2cloudless i geometryczna projekcja cieni), Sentinel-3 SLSTR / 1km LST, Copernicus DEM GLO-30 oraz wieloletnia baze referencyjna 2018-2025.
+- Z GEE: Sentinel-2 L2A (10 pasm BOA z maska s2cloudless i geometryczna projekcja cieni), zsynchronizowane sceny termiczne LST 1km (Sentinel-3 SLSTR / MODIS), Copernicus DEM GLO-30 oraz wieloletnia baze referencyjna 2018-2025.
 - Z Copernicus CDSE API: Oficjalny wielopoziomowy profil wilgotnosci gleby CGLS SWI 1km (8 glebokosci T=2..100) oraz gotowa trajektorie fenologiczna Copernicus CLMS HR-VPP ST 10m (PPI + QFLAG) bez sztucznych przyblizen.""")
 
     add_code("""# Bezposredni import z modulu na Dysku Google
