@@ -401,7 +401,8 @@ plt.show()
 Podniesienie rozdzielczości pasm RGBN (B02, B03, B04, B08) 4x do 2.5 m/px za pomocą modelu Deep Learning SEN2SR (GPU T4) oraz geostatystyczna fuzja ATPRK z funkcją PSF i konserwacją energii dla kanałów 20m, LST oraz fenologii PPI.""")
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
-from step_03_super_resolve import super_resolve_bands
+from step_03_super_resolve import super_resolve_bands, plot_rgb_comparison
+import os
 
 bands_25m, profile_25m = super_resolve_bands(
     s2_bands=s2_bands,
@@ -413,6 +414,10 @@ print('[OK] KROK 3 ZAKOŃCZONY POMYŚLNIE:')
 print(f' - Nowy rozmiar siatki 2.5m: {bands_25m[\"B04\"].shape}')
 print(f' - Transformacja afiniczna piksela: {profile_25m[\"transform\"].a} m')
 print(f' - Wygenerowane warstwy 2.5m: {list(bands_25m.keys())}')
+
+# Wizualizacja porównawcza RGB: Przed (10 m) vs Po Upscalingu (2.5 m)
+path_rgb_cmp = os.path.join(CONFIG['OUTPUT_DIR'], 'RGB_Comparison_10m_vs_2.5m.png')
+plot_rgb_comparison(s2_bands, bands_25m, save_path=path_rgb_cmp)
 """)
 
     # 10. Moduł 4: Wskaźniki, Z-score i Protokół Walda

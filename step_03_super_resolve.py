@@ -460,18 +460,119 @@ def super_resolve_bands(
 
 
 # ==============================================================================
-# V. TEST SAMODZIELNY MODUŁU
+# V. WIZUALIZACJA PORÓWNAWCZA RGB (PRZED I PO UPSCALINGU)
+# ==============================================================================
+
+def make_rgb_composite(
+    r: np.ndarray,
+    g: np.ndarray,
+    b: np.ndarray,
+    p_low: float = 2.0,
+    p_high: float = 98.0
+) -> np.ndarray:
+    """
+    Tworzy trójkanałową kompozycję RGB (True Color) z dynamicznym rozciągnięciem kontrastu
+    (percentyle 2% - 98%) zapewniającym naturalne odwzorowanie barw roślinności i gleby.
+    """
+    rgb = np.stack([r, g, b], axis=-1).astype(np.float32)
+    rgb = np.nan_to_num(rgb, nan=0.0)
+
+    rgb_stretched = np.zeros_like(rgb)
+    for c in range(3):
+        ch = rgb[..., c]
+        valid_px = ch[ch > 0.0]
+        if len(valid_px) > 100:
+            v_min = float(np.percentile(valid_px, p_low))
+            v_max = float(np.percentile(valid_px, p_high))
+        else:
+            v_min, v_max = float(np.min(ch)), float(np.max(ch))
+
+        if v_max > v_min:
+            rgb_stretched[..., c] = np.clip((ch - v_min) / (v_max - v_min), 0.0, 1.0)
+        else:
+            rgb_stretched[..., c] = np.clip(ch, 0.0, 1.0)
+
+    return rgb_stretched
+
+
+def plot_rgb_comparison(
+    s2_bands: Dict[str, np.ndarray],
+    bands_25m: Dict[str, np.ndarray],
+    save_path: Optional[str] = None,
+    show_plot: bool = True
+) -> Any:
+    """
+    Generuje porównanie wizualne kompozycji RGB (True Color) obok siebie:
+      - Lewy panel: Natywne zobrazowanie Sentinel-2 L2A (10 m / px)
+      - Prawy panel: Zaostrzone zobrazowanie SEN2SR Super-Resolution (2.5 m / px)
+
+    Parametry:
+        s2_bands: Słownik z oryginalnymi pasmami Sentinel-2 (w tym B04, B03, B02 w 10 m).
+        bands_25m: Słownik z pasmami po fuzji 2.5 m (w tym B04, B03, B02).
+        save_path: Opcjonalna ścieżka zapisu pliku PNG.
+        show_plot: Flaga określająca czy wywołać plt.show().
+    """
+    import matplotlib.pyplot as plt
+
+    for k in ["B04", "B03", "B02"]:
+        if k not in s2_bands or k not in bands_25m:
+            logger.warning(f"Brak pasma '{k}' do wygenerowania kompozycji RGB.")
+            return None
+
+    rgb_10m = make_rgb_composite(
+        r=s2_bands["B04"],
+        g=s2_bands["B03"],
+        b=s2_bands["B02"]
+    )
+
+    rgb_25m = make_rgb_composite(
+        r=bands_25m["B04"],
+        g=bands_25m["B03"],
+        b=bands_25m["B02"]
+    )
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 8))
+
+    # Panel 1: Sentinel-2 10 m
+    h_10, w_10 = s2_bands["B04"].shape
+    axes[0].imshow(rgb_10m)
+    axes[0].set_title(f"Sentinel-2 L2A RGB - Przed Upscalingiem (10 m)\nSiatka: {h_10} x {w_10} px", fontsize=13, fontweight="bold")
+    axes[0].set_xlabel("Piksele X [10 m / px]")
+    axes[0].set_ylabel("Piksele Y [10 m / px]")
+    axes[0].grid(False)
+
+    # Panel 2: SEN2SR 2.5 m
+    h_25, w_25 = bands_25m["B04"].shape
+    axes[1].imshow(rgb_25m)
+    axes[1].set_title(f"SEN2SR Deep Learning RGB - Po Upscalingu (2.5 m)\nSiatka: {h_25} x {w_25} px (Rozdzielczość 4x)", fontsize=13, fontweight="bold")
+    axes[1].set_xlabel("Piksele X [2.5 m / px]")
+    axes[1].set_ylabel("Piksele Y [2.5 m / px]")
+    axes[1].grid(False)
+
+    plt.tight_layout()
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=200, bbox_inches="tight")
+        logger.info(f"Zapisano porównanie wizualne RGB: {save_path}")
+
+    if show_plot:
+        plt.show()
+
+    return fig
+
+
+# ==============================================================================
+# VI. TEST SAMODZIELNY MODUŁU
 # ==============================================================================
 if __name__ == "__main__":
     print("Testowanie modułu step_03_super_resolve.py na syntetycznych danych (w tym nieparzyste wymiary)...")
-    # Test na DOKŁADNIE takich nieparzystych wymiarach jak w GBOV Condom (h=381, w=344)
     h, w = 381, 344
     mock_s2 = {
         "B02": np.random.uniform(0.02, 0.08, (h, w)).astype(np.float32),
         "B03": np.random.uniform(0.03, 0.12, (h, w)).astype(np.float32),
         "B04": np.random.uniform(0.04, 0.15, (h, w)).astype(np.float32),
         "B08": np.random.uniform(0.20, 0.50, (h, w)).astype(np.float32),
-        # Pasmo 20m o wymiarach zaokrąglonych w dół (190, 172) - dokładnie jak w problematycznym błędzie
         "B05": np.random.uniform(0.08, 0.20, (h // 2, w // 2)).astype(np.float32),
         "B11": np.random.uniform(0.10, 0.30, (h, w)).astype(np.float32)
     }
@@ -490,4 +591,9 @@ if __name__ == "__main__":
     print(" Nowy piksel transformacji:", out_prof['transform'].a)
     assert out_bands["B05"].shape == (h * 4, w * 4), "B05 nie ma dokładnie wymiarów (1524, 1376)!"
     assert out_bands["LST_2.5m"].shape == (h * 4, w * 4), "LST_2.5m nie ma dokładnie wymiarów (1524, 1376)!"
+
+    # Test funkcji wizualizacji RGB (bez blokowania show)
+    fig = plot_rgb_comparison(mock_s2, out_bands, show_plot=False)
+    assert fig is not None, "Wizualizacja RGB nie zwróciła obiektu Figure!"
+    print(" Test wizualizacji RGB przed/po upscalingu zakończony sukcesem!")
     print(" Wszystkie asercje spójności wymiarów i georeferencji zaliczone!")
