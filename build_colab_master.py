@@ -398,10 +398,23 @@ plt.show()
 
     # 9. Moduł 3: Super-Resolution SEN2SR & ATPRK
     add_md("""## MODUŁ 3: Super-Rozdzielczość SEN2SR i Fuzja ATPRK do Siatki 2.5 m (`step_03_super_resolve.py`)
-Podniesienie rozdzielczości pasm RGBN (B02, B03, B04, B08) 4x do 2.5 m/px za pomocą modelu Deep Learning SEN2SR (GPU T4) oraz geostatystyczna fuzja ATPRK z funkcją PSF i konserwacją energii dla kanałów 20m, LST oraz fenologii PPI.""")
+Podniesienie rozdzielczości pasm RGBN (B02, B03, B04, B08) 4x do 2.5 m/px za pomocą modelu Deep Learning SEN2SR (GPU T4) oraz geostatystyczna fuzja ATPRK z funkcją PSF i konserwacją energii dla kanałów 20m, LST oraz fenologii PPI.
+
+Moduł generuje:
+1. **Pełnowartościowe georeferencyjne pliki Cloud-Optimized GeoTIFF (`.tif`) dla QGIS**:
+   - `S2_RGB_10m.tif` oraz `SEN2SR_RGB_2.5m.tif` (3-kanałowe pasma float32 BOA reflectance)
+   - `S2_RGB_TrueColor_10m.tif` oraz `SEN2SR_RGB_TrueColor_2.5m.tif` (3-kanałowe uint8 do natychmiastowego otwarcia w QGIS)
+   - Indywidualne pasma 2.5 m (`B02_2.5m.tif`, `B03_2.5m.tif`, `B04_2.5m.tif`, `B08_2.5m.tif`, `B05_2.5m.tif`, `LST_2.5m.tif`)
+2. **Interaktywną mapę Geemap / Folium z wektorami działek katastralnych** (GBOV sady i winnice), umożliwiającą bezpośrednie porównywanie szczegółowości upscalingu (10 m vs 2.5 m) bezpośrednio w notatniku Colab.
+3. **Porównanie statyczne RGB** (wykres `matplotlib` zapisany jako PNG do raportów).""")
 
     add_code("""# Bezpośredni import z modułu na Dysku Google
-from step_03_super_resolve import super_resolve_bands, plot_rgb_comparison
+from step_03_super_resolve import (
+    super_resolve_bands,
+    export_rgb_geotiffs,
+    create_interactive_rgb_map,
+    plot_rgb_comparison
+)
 import os
 
 bands_25m, profile_25m = super_resolve_bands(
@@ -411,13 +424,44 @@ bands_25m, profile_25m = super_resolve_bands(
 )
 
 print('[OK] KROK 3 ZAKOŃCZONY POMYŚLNIE:')
-print(f' - Nowy rozmiar siatki 2.5m: {bands_25m[\"B04\"].shape}')
-print(f' - Transformacja afiniczna piksela: {profile_25m[\"transform\"].a} m')
+print(f' - Nowy rozmiar siatki 2.5m: {bands_25m["B04"].shape}')
+print(f' - Transformacja afiniczna piksela: {profile_25m["transform"].a} m')
 print(f' - Wygenerowane warstwy 2.5m: {list(bands_25m.keys())}')
 
-# Wizualizacja porównawcza RGB: Przed (10 m) vs Po Upscalingu (2.5 m)
+# 1. Zapis georeferencyjnych rastrów GeoTIFF (COG) z układem EPSG:32631 dla QGIS
+print('\\n[GEO-EKSPORT QGIS] Zapis georeferencyjnych rastrów do folderu:', CONFIG['OUTPUT_DIR'])
+saved_geotiffs = export_rgb_geotiffs(
+    s2_bands=s2_bands,
+    bands_25m=bands_25m,
+    profile_10m=profile_10m,
+    profile_25m=profile_25m,
+    output_dir=CONFIG['OUTPUT_DIR'],
+    target_date=CONFIG.get('TARGET_DATE')
+)
+for name, p in saved_geotiffs.items():
+    print(f' -> {name}: {p}')
+try:
+    os.sync()
+except Exception:
+    pass
+
+# 2. Statyczny wykres porównawczy RGB przed vs po (zapisany jako PNG do raportów)
 path_rgb_cmp = os.path.join(CONFIG['OUTPUT_DIR'], 'RGB_Comparison_10m_vs_2.5m.png')
-plot_rgb_comparison(s2_bands, bands_25m, save_path=path_rgb_cmp)
+plot_rgb_comparison(s2_bands, bands_25m, save_path=path_rgb_cmp, show_plot=True)
+
+# 3. Spójna interaktywna mapa z wektorami działek katastralnych (Geemap / Folium)
+print('\\n[INTERAKTYWNA MAPA COLAB] Wczytywanie warstw 10m, 2.5m oraz wektora działek GBOV...')
+m_sr = create_interactive_rgb_map(
+    s2_bands=s2_bands,
+    bands_25m=bands_25m,
+    profile_10m=profile_10m,
+    parcels_path=CONFIG.get('PARCELS_PATH'),
+    geojson_path=CONFIG.get('GEOJSON_PATH'),
+    center_lat=CONFIG.get('LAT'),
+    center_lon=CONFIG.get('LON'),
+    zoom=15
+)
+m_sr
 """)
 
     # 10. Moduł 4: Wskaźniki, Z-score i Protokół Walda

@@ -563,7 +563,223 @@ def plot_rgb_comparison(
 
 
 # ==============================================================================
-# VI. TEST SAMODZIELNY MODUŁU
+# VI. EKSPORT GEOREFERENCYJNYCH COG GEOTIFF DLA QGIS
+# ==============================================================================
+
+def write_geotiff_raster(
+    data: np.ndarray,
+    profile: dict,
+    filepath: str,
+    nodata_val: Optional[float] = None
+) -> None:
+    """
+    Zapisuje tablicę 2D lub 3D NumPy jako Cloud-Optimized GeoTIFF (COG) z kompresją LZW.
+    Obsługuje formaty float32 oraz uint8 z precyzyjnym odwzorowaniem CRS i transformacji afinicznej.
+    """
+    import rasterio
+
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    out_prof = profile.copy()
+
+    if data.ndim == 2:
+        count = 1
+        h, w = data.shape
+        data_to_write = data[np.newaxis, :, :]
+    elif data.ndim == 3:
+        count, h, w = data.shape
+        data_to_write = data
+    else:
+        raise ValueError(f"Nieobsługiwany wymiar macierzy: {data.shape}")
+
+    dtype_str = "uint8" if data.dtype == np.uint8 else "float32"
+
+    out_prof.update({
+        "driver": "GTiff",
+        "height": h,
+        "width": w,
+        "count": count,
+        "dtype": dtype_str,
+        "tiled": True,
+        "blockxsize": 256,
+        "blockysize": 256,
+        "compress": "lzw",
+        "nodata": None if dtype_str == "uint8" else nodata_val
+    })
+
+    if dtype_str == "float32" and nodata_val is not None:
+        data_to_write = np.nan_to_num(data_to_write, nan=nodata_val).astype(np.float32)
+
+    with rasterio.open(filepath, "w", **out_prof) as dst:
+        dst.write(data_to_write)
+
+    logger.info(f"Zapisano GeoTIFF: {filepath} ({h}x{w}, pasma={count}, {dtype_str})")
+
+
+def export_rgb_geotiffs(
+    s2_bands: Dict[str, np.ndarray],
+    bands_25m: Dict[str, np.ndarray],
+    profile_10m: dict,
+    profile_25m: dict,
+    output_dir: str,
+    target_date: Optional[str] = None
+) -> Dict[str, str]:
+    """
+    Eksportuje georeferencyjne rastry wielokanałowe GeoTIFF (COG) z układem CRS EPSG:32631
+    i precyzyjną transformacją afiniczną bezpośrednio dla QGIS:
+      1. S2_RGB_10m.tif - 3-kanałowe odbicie BOA w 10 m (B04, B03, B02, float32)
+      2. SEN2SR_RGB_2.5m.tif - 3-kanałowe zaostrzone pasma 2.5 m (B04, B03, B02, float32)
+      3. S2_RGB_TrueColor_10m.tif - 3-kanałowy obraz uint8 [0-255] zoptymalizowany pod natychmiastowe wyświetlanie w QGIS
+      4. SEN2SR_RGB_TrueColor_2.5m.tif - 3-kanałowy obraz uint8 [0-255] zoptymalizowany pod natychmiastowe wyświetlanie w QGIS
+      5. Pojedyncze zaostrzone pasma 2.5 m (B02, B03, B04, B08, B05, LST_2.5m)
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    exported_files = {}
+
+    date_suffix = f"_{target_date}" if target_date else ""
+
+    # Przygotowanie 3-pasmowych kompozycji float32 (B04=Czerwony, B03=Zielony, B02=Niebieski)
+    if all(k in s2_bands for k in ["B04", "B03", "B02"]):
+        s2_rgb_f32 = np.stack([s2_bands["B04"], s2_bands["B03"], s2_bands["B02"]], axis=0).astype(np.float32)
+        p_s2_f32 = os.path.join(output_dir, f"S2_RGB_10m{date_suffix}.tif")
+        write_geotiff_raster(s2_rgb_f32, profile_10m, p_s2_f32)
+        exported_files["S2_RGB_10m_float32"] = p_s2_f32
+
+        # Wersja 8-bit True Color (natychmiastowe otwarcie w QGIS w naturalnych barwach)
+        s2_rgb_stretched = make_rgb_composite(s2_bands["B04"], s2_bands["B03"], s2_bands["B02"])
+        s2_rgb_u8 = np.transpose((s2_rgb_stretched * 255.0).astype(np.uint8), (2, 0, 1))
+        p_s2_u8 = os.path.join(output_dir, f"S2_RGB_TrueColor_10m{date_suffix}.tif")
+        write_geotiff_raster(s2_rgb_u8, profile_10m, p_s2_u8)
+        exported_files["S2_RGB_TrueColor_10m"] = p_s2_u8
+
+    if all(k in bands_25m for k in ["B04", "B03", "B02"]):
+        sr_rgb_f32 = np.stack([bands_25m["B04"], bands_25m["B03"], bands_25m["B02"]], axis=0).astype(np.float32)
+        p_sr_f32 = os.path.join(output_dir, f"SEN2SR_RGB_2.5m{date_suffix}.tif")
+        write_geotiff_raster(sr_rgb_f32, profile_25m, p_sr_f32)
+        exported_files["SEN2SR_RGB_2.5m_float32"] = p_sr_f32
+
+        # Wersja 8-bit True Color
+        sr_rgb_stretched = make_rgb_composite(bands_25m["B04"], bands_25m["B03"], bands_25m["B02"])
+        sr_rgb_u8 = np.transpose((sr_rgb_stretched * 255.0).astype(np.uint8), (2, 0, 1))
+        p_sr_u8 = os.path.join(output_dir, f"SEN2SR_RGB_TrueColor_2.5m{date_suffix}.tif")
+        write_geotiff_raster(sr_rgb_u8, profile_25m, p_sr_u8)
+        exported_files["SEN2SR_RGB_TrueColor_2.5m"] = p_sr_u8
+
+    # Eksport poszczególnych zaostrzonych pasm 2.5 m
+    for band_name, band_data in bands_25m.items():
+        if band_data is not None and isinstance(band_data, np.ndarray) and band_data.ndim == 2:
+            suffix_band = "" if band_name.endswith("_2.5m") else "_2.5m"
+            clean_name = band_name if not band_name.endswith("_2.5m") else band_name[:-5]
+            p_band = os.path.join(output_dir, f"{clean_name}_2.5m{date_suffix}.tif")
+            write_geotiff_raster(band_data.astype(np.float32), profile_25m, p_band)
+            exported_files[f"Band_{clean_name}_2.5m"] = p_band
+
+    logger.info(f"Wyeksportowano łącznie {len(exported_files)} georeferencyjnych plików GeoTIFF dla QGIS.")
+    return exported_files
+
+
+# ==============================================================================
+# VII. INTERAKTYWNA MAPA COLAB ZE SPÓJNĄ WARSTWĄ DZIAŁEK (GEEMAP / FOLIUM)
+# ==============================================================================
+
+def create_interactive_rgb_map(
+    s2_bands: Dict[str, np.ndarray],
+    bands_25m: Dict[str, np.ndarray],
+    profile_10m: dict,
+    parcels_path: Optional[str] = None,
+    geojson_path: Optional[str] = None,
+    center_lat: Optional[float] = None,
+    center_lon: Optional[float] = None,
+    zoom: int = 15
+) -> Any:
+    """
+    Tworzy interaktywną mapę Geemap / Folium ze spójną warstwą wektorową działek
+    katastralnych (GBOV sady i winnice) oraz nakładkami rastrowymi 10 m (S2) i 2.5 m (SEN2SR).
+    Umożliwia bezpośrednie porównywanie szczegółowości upscalingu nad działkami w Colab.
+    """
+    import folium
+    from folium.raster_layers import ImageOverlay
+    import rasterio.transform
+    import rasterio.warp
+
+    # 1. Obliczenie granic geograficznych w WGS84 (EPSG:4326) z profilu rastra
+    h_10, w_10 = s2_bands["B04"].shape
+    left, bottom, right, top = rasterio.transform.array_bounds(h_10, w_10, profile_10m["transform"])
+    west, south, east, north = rasterio.warp.transform_bounds(profile_10m["crs"], "EPSG:4326", left, bottom, right, top)
+    bounds = [[south, west], [north, east]]
+
+    if center_lat is None or center_lon is None:
+        center_lat = (south + north) / 2.0
+        center_lon = (west + east) / 2.0
+
+    # 2. Inicjalizacja mapy bazowej (zabezpieczenie fallback Geemap -> Folium)
+    try:
+        import geemap.foliumap as geemap
+        m = geemap.Map(center=[center_lat, center_lon], zoom=zoom)
+        m.add_basemap("HYBRID")
+    except Exception:
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom)
+        folium.TileLayer(
+            tiles="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+            attr="Google Satellite Hybrid",
+            name="Google Hybrid",
+            overlay=False,
+            control=True
+        ).add_to(m)
+
+    # 3. Przygotowanie kompozycji RGB 8-bit dla rastrów
+    rgb_10m_img = make_rgb_composite(s2_bands["B04"], s2_bands["B03"], s2_bands["B02"])
+    rgb_25m_img = make_rgb_composite(bands_25m["B04"], bands_25m["B03"], bands_25m["B02"])
+    rgb_10m_u8 = (rgb_10m_img * 255.0).astype(np.uint8)
+    rgb_25m_u8 = (rgb_25m_img * 255.0).astype(np.uint8)
+
+    # 4. Dodanie warstw rastrowych jako ImageOverlay
+    ImageOverlay(
+        image=rgb_10m_u8,
+        bounds=bounds,
+        name="1. Sentinel-2 L2A RGB (10 m)",
+        opacity=0.85,
+        interactive=True
+    ).add_to(m)
+
+    ImageOverlay(
+        image=rgb_25m_u8,
+        bounds=bounds,
+        name="2. SEN2SR Super-Resolution RGB (2.5 m)",
+        opacity=0.95,
+        interactive=True
+    ).add_to(m)
+
+    # 5. Dodanie warstwy wektorowej działek (spójność z Krokami 5 i 6 potoku)
+    for path_candidate, layer_title, color_hex in [
+        (parcels_path, "3. Działki GBOV (Sady i Winnice)", "#f1c40f"),
+        (geojson_path, "4. Zasięg Bufora AOI", "#3498db")
+    ]:
+        if path_candidate and os.path.exists(path_candidate):
+            try:
+                import json
+                with open(path_candidate, "r", encoding="utf-8") as f:
+                    geo_data = json.load(f)
+                folium.GeoJson(
+                    geo_data,
+                    name=layer_title,
+                    style_function=lambda x, c=color_hex: {
+                        "color": c,
+                        "weight": 2.5,
+                        "fillColor": c,
+                        "fillOpacity": 0.05
+                    }
+                ).add_to(m)
+            except Exception as e:
+                logger.warning(f"Nie udało się załadować wektora {path_candidate}: {e}")
+
+    # 6. Kontrolka wyboru warstw do wygodnego włączania/wyłączania
+    folium.LayerControl(collapsed=False).add_to(m)
+    logger.info("Utworzono interaktywną mapę Colab z warstwami 10m, 2.5m oraz wektorami działek.")
+    return m
+
+
+# ==============================================================================
+# VIII. TEST SAMODZIELNY MODUŁU
 # ==============================================================================
 if __name__ == "__main__":
     print("Testowanie modułu step_03_super_resolve.py na syntetycznych danych (w tym nieparzyste wymiary)...")
@@ -596,4 +812,16 @@ if __name__ == "__main__":
     fig = plot_rgb_comparison(mock_s2, out_bands, show_plot=False)
     assert fig is not None, "Wizualizacja RGB nie zwróciła obiektu Figure!"
     print(" Test wizualizacji RGB przed/po upscalingu zakończony sukcesem!")
-    print(" Wszystkie asercje spójności wymiarów i georeferencji zaliczone!")
+
+    # Test eksportu georeferencyjnych GeoTIFF dla QGIS
+    test_out_dir = "scratch/test_export_qgis"
+    saved_files = export_rgb_geotiffs(mock_s2, out_bands, mock_profile, out_prof, test_out_dir, target_date="2023-07-15")
+    assert "S2_RGB_10m_float32" in saved_files, "Brak S2_RGB_10m_float32!"
+    assert "SEN2SR_RGB_2.5m_float32" in saved_files, "Brak SEN2SR_RGB_2.5m_float32!"
+    assert "SEN2SR_RGB_TrueColor_2.5m" in saved_files, "Brak SEN2SR_RGB_TrueColor_2.5m!"
+    print(f" Test eksportu GeoTIFF dla QGIS pomyślny! Wygenerowano {len(saved_files)} plików.")
+
+    # Czyszczenie katalogu testowego
+    import shutil
+    shutil.rmtree(test_out_dir, ignore_errors=True)
+    print(" Wszystkie asercje spójności wymiarów, georeferencji i GeoTIFF dla QGIS zaliczone!")

@@ -33,7 +33,7 @@ import rasterio
 # Import poszczególnych modułów potoku
 from step_01_ingest import ingest_satellite_data
 from step_02_align_and_scale import align_and_scale_lst
-from step_03_super_resolve import super_resolve_bands
+from step_03_super_resolve import super_resolve_bands, export_rgb_geotiffs
 from step_04_metrics_alert import compute_metrics_and_alerts
 
 # Konfiguracja logowania zdarzeń
@@ -184,11 +184,14 @@ Klasyfikacja anomalii Z-score wskaźnika TCARI/OSAVI na siatce super-rozdzielcze
 
 ## 4. Wygenerowane Produkty Rastrowe (Cloud-Optimized GeoTIFF)
 
-Wszystkie pliki zostały zapisane w katalogu `{output_dir}`:
+Wszystkie pliki zostały zapisane w katalogu `{output_dir}` z pełną georeferencją (CRS: EPSG:32631) gotowe do analizy w QGIS:
 1. `LST_10m_sharpened.tif` – Skorygowana topograficznie i zaostrzona temperatura LST w rozdzielczości 10 m.
 2. `TCARI_OSAVI_2.5m.tif` – Wskaźnik chlorozy upraw na siatce super-rozdzielczej 2.5 m (SEN2SR + ATPRK).
 3. `TVDI_10m.tif` – Wskaźnik suszy termicznej TVDI (trójkąt LST-NDVI) w rozdzielczości 10 m.
 4. `Alert_Matrix_2.5m.tif` – Całkowitoliczbowa mapa alertów agronomicznych (klasy 0, 1, 2) w rozdzielczości 2.5 m.
+5. `S2_RGB_10m.tif` / `S2_RGB_TrueColor_10m.tif` – 3-kanałowa kompozycja RGB Sentinel-2 (10 m) do bezpośredniego porównania w QGIS.
+6. `SEN2SR_RGB_2.5m.tif` / `SEN2SR_RGB_TrueColor_2.5m.tif` – 3-kanałowa kompozycja RGB SEN2SR (2.5 m) do bezpośredniego porównania w QGIS.
+7. Poszczególne pasma 2.5 m: `B02_2.5m.tif`, `B03_2.5m.tif`, `B04_2.5m.tif`, `B08_2.5m.tif`, `B05_2.5m.tif`, `LST_2.5m.tif`.
 """
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report_content)
@@ -339,6 +342,17 @@ def run_pipeline(config: Dict[str, Any] = CONFIG) -> None:
         write_cog_geotiff(products["crop_mask_25m"], profile_25m, path_crop)
     if "ppi_25m" in products:
         write_cog_geotiff(products["ppi_25m"], profile_25m, path_ppi)
+
+    # Eksport wielopasmowych i zaostrzonych kompozycji RGB dla porównania w QGIS
+    logger.info("Eksport georeferencyjnych rastrów RGB (10 m vs 2.5 m) dla QGIS...")
+    export_rgb_geotiffs(
+        s2_bands=s2_bands,
+        bands_25m=bands_25m,
+        profile_10m=profile_10m,
+        profile_25m=profile_25m,
+        output_dir=output_dir,
+        target_date=config.get("TARGET_DATE")
+    )
 
     # Generowanie raportu Markdown
     report_file = generate_validation_report(
