@@ -23,8 +23,8 @@ def run_integration_test():
     print("ROZPOCZĘCIE TESTU INTEGRACYJNEGO POTOKU...")
     print("================================================================================")
 
-    # 1. Symulacja danych wyjściowych z Kroku 1 (10m grid)
-    h_10m, w_10m = 80, 80
+    # 1. Symulacja danych wyjściowych z Kroku 1 (10m grid) - nieparzysty wymiar jak w GBOV Condom
+    h_10m, w_10m = 381, 344
     bands_10m = ["B02", "B03", "B04", "B08"]
     bands_20m = ["B05", "B06", "B07", "B8A", "B11", "B12"]
 

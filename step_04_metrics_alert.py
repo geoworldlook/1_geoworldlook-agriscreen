@@ -27,6 +27,7 @@ from typing import Dict, Any, Tuple, Optional
 
 import numpy as np
 from scipy.ndimage import gaussian_filter, zoom
+from step_03_super_resolve import align_raster_shape
 try:
     from skimage.metrics import structural_similarity as ssim_fn
 except ImportError:
@@ -190,10 +191,8 @@ def compute_zscore_alerts(
 
     # Dopasowanie wymiarów bazy historycznej do siatki 2.5m (jeśli baza była w 10m)
     if baseline_mean.shape != current_metric.shape:
-        zoom_y = current_metric.shape[0] / baseline_mean.shape[0]
-        zoom_x = current_metric.shape[1] / baseline_mean.shape[1]
-        mean_resampled = zoom(baseline_mean, (zoom_y, zoom_x), order=1).astype(np.float32)
-        std_resampled = zoom(baseline_std, (zoom_y, zoom_x), order=1).astype(np.float32)
+        mean_resampled = align_raster_shape(baseline_mean, current_metric.shape, order=1).astype(np.float32)
+        std_resampled = align_raster_shape(baseline_std, current_metric.shape, order=1).astype(np.float32)
     else:
         mean_resampled = baseline_mean.astype(np.float32)
         std_resampled = baseline_std.astype(np.float32)
@@ -256,29 +255,35 @@ def run_wald_protocol_validation(
     i_40 = blurred[::decimation_factor, ::decimation_factor]
 
     # 3. Rekonstrukcja super-rozdzielcza z powrotem do 10m
-    # Użycie interpolacji bikubicznej z wyostrzaniem krawędziowym
-    i_rec = zoom(i_40, decimation_factor, order=3)[:h, :w]
+    # Użycie align_raster_shape z interpolacją bikubiczną (spline 3)
+    i_rec = align_raster_shape(i_40, (h, w), order=3)
     # Rekonstrukcja detali
     high_pass = i_rec - gaussian_filter(i_rec, sigma=1.0)
     i_rec = np.clip(i_rec + 0.35 * high_pass, 0.0, 1.0)
 
-    # 4. Obliczenie metryk
-    diff = i_rec - i_10
+    # 4. Obliczenie metryk błędu
+    diff = i_10 - i_rec
     rmse = float(np.sqrt(np.mean(diff ** 2)))
 
-    # SAM (Spectral Angle Mapper w stopniach)
-    numerator = np.sum(i_rec * i_10)
-    denominator = np.sqrt(np.sum(i_rec ** 2)) * np.sqrt(np.sum(i_10 ** 2)) + EPSILON
-    cos_angle = np.clip(numerator / denominator, -1.0, 1.0)
-    sam_deg = float(np.arccos(cos_angle) * (180.0 / np.pi))
+    # SAM (Spectral Angle Mapper)
+    dot_prod = np.sum(i_10 * i_rec)
+    norm_orig = np.sqrt(np.sum(i_10 ** 2))
+    norm_rec = np.sqrt(np.sum(i_rec ** 2))
+    cos_sam = dot_prod / (norm_orig * norm_rec + EPSILON)
+    cos_sam = np.clip(cos_sam, -1.0, 1.0)
+    sam_rad = float(np.arccos(cos_sam))
+    sam_deg = float(np.degrees(sam_rad))
 
     # SSIM (Structural Similarity Index)
-    ssim_val = float(ssim_fn(i_10, i_rec, data_range=1.0))
+    data_rng = float(np.nanmax(i_10) - np.nanmin(i_10))
+    if data_rng <= 0:
+        data_rng = 1.0
+    ssim_val = ssim_fn(i_10, i_rec, data_range=data_rng)
 
     metrics = {
         "rmse": rmse,
         "sam_degrees": sam_deg,
-        "ssim": ssim_val
+        "ssim": float(ssim_val)
     }
 
     logger.info(f"Metryki Walda: RMSE = {rmse:.4f}, SAM = {sam_deg:.2f}°, SSIM = {ssim_val:.4f}")
@@ -339,18 +344,18 @@ def compute_metrics_and_alerts(
     )
 
     # 3. Obliczenie NDVI 10m i wskaźnika TVDI w rozdzielczości 10 m
-    # Resamplowanie pasm B08 i B04 z powrotem do 10m lub bezpośrednio z wymiarów LST
+    # Resamplowanie pasm B08 i B04 z powrotem do 10m z gwarancją identycznych wymiarów co lst_10m
     h_10m, w_10m = lst_10m.shape
-    b04_10m = zoom(b04_25m, (h_10m / b04_25m.shape[0], w_10m / b04_25m.shape[1]), order=1)
-    b08_10m = zoom(b08_25m, (h_10m / b08_25m.shape[0], w_10m / b08_25m.shape[1]), order=1)
+    b04_10m = align_raster_shape(b04_25m, (h_10m, w_10m), order=1)
+    b08_10m = align_raster_shape(b08_25m, (h_10m, w_10m), order=1)
 
     ndvi_10m = (b08_10m - b04_10m) / (b08_10m + b04_10m + EPSILON)
     tvdi_10m = compute_tvdi_index(lst_10m, ndvi_10m, n_bins=100)
 
     # Wersja TVDI na siatce 2.5 m dla spójności warstw wynikowych
-    tvdi_25m = zoom(
+    tvdi_25m = align_raster_shape(
         tvdi_10m,
-        (ratio_25m.shape[0] / h_10m, ratio_25m.shape[1] / w_10m),
+        (ratio_25m.shape[0], ratio_25m.shape[1]),
         order=1
     ).astype(np.float32)
 

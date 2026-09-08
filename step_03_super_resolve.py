@@ -50,7 +50,57 @@ EPSILON = 1e-6
 
 
 # ==============================================================================
-# I. SILNIK SUPER-ROZDZIELCZOŚCI SEN2SR (RGBN 10m -> 2.5m)
+# I. POMOCNICZA FUNKCJA SPÓJNOŚCI PRZESTRZENNEJ RINA / RESIZE
+# ==============================================================================
+
+def align_raster_shape(
+    arr: np.ndarray,
+    target_shape: Tuple[int, int],
+    order: int = 1
+) -> np.ndarray:
+    """
+    Dopasowuje raster 2D do zadanego docelowego kształtu (target_h, target_w)
+    z bezwzględną gwarancją identycznych wymiarów i spójności pikseli.
+    Eliminuje błędy broadcastingu wynikające z nieparzystych wymiarów rastrów
+    (np. 381 // 2 = 190, a 190 * 8 = 1520 != 1524), ułamkowych współczynników
+    oraz anomalii zaokrągleń interpolacji.
+    """
+    if arr.shape == target_shape:
+        return arr
+
+    th, tw = target_shape
+    ch, cw = arr.shape
+    if ch == 0 or cw == 0:
+        return np.zeros(target_shape, dtype=arr.dtype)
+
+    zoom_y = th / float(ch)
+    zoom_x = tw / float(cw)
+
+    # Wykonanie skalowania przestrzennego
+    scaled = zoom(arr, (zoom_y, zoom_x), order=order)
+
+    # Precyzyjne dopasowanie do zadanych wymiarów (zabezpieczenie przed +/-1 px)
+    if scaled.shape == target_shape:
+        return scaled.astype(arr.dtype)
+
+    out = np.zeros(target_shape, dtype=arr.dtype)
+    copy_h = min(scaled.shape[0], th)
+    copy_w = min(scaled.shape[1], tw)
+    out[:copy_h, :copy_w] = scaled[:copy_h, :copy_w]
+
+    # Ekstrapolacja krawędziowa jeśli brakowało piksela na brzegu
+    if scaled.shape[0] < th:
+        out[copy_h:, :copy_w] = scaled[-1:, :copy_w]
+    if scaled.shape[1] < tw:
+        out[:copy_h, copy_w:] = scaled[:copy_h, -1:]
+    if scaled.shape[0] < th and scaled.shape[1] < tw:
+        out[copy_h:, copy_w:] = scaled[-1, -1]
+
+    return out.astype(arr.dtype)
+
+
+# ==============================================================================
+# II. SILNIK SUPER-ROZDZIELCZOŚCI SEN2SR (RGBN 10m -> 2.5m)
 # ==============================================================================
 
 def run_sen2sr_inference(
@@ -71,7 +121,7 @@ def run_sen2sr_inference(
         rgbn_25m: Macierz o kształcie (4, H*4, W*4) w rozdzielczości 2.5 m.
     """
     channels, h, w = rgbn_10m.shape
-    h_out, w_out = h * SCALE_FACTOR_10M_TO_25M, w * SCALE_FACTOR_10M_TO_25M
+    h_out, w_out = int(h * SCALE_FACTOR_10M_TO_25M), int(w * SCALE_FACTOR_10M_TO_25M)
 
     logger.info(f"SEN2SR: Wejście 10m ({channels}x{h}x{w}) -> Wyjście 2.5m ({channels}x{h_out}x{w_out}). Device: {DEVICE}")
 
@@ -95,7 +145,7 @@ def run_sen2sr_inference(
                 tensor_in = torch.from_numpy(rgbn_10m[np.newaxis, ...]).float().to(DEVICE)
                 import sen2sr
                 super_tensor = sen2sr.predict_large(model=sen2sr_model, X=tensor_in, overlap=overlap)
-                rgbn_25m = super_tensor.squeeze(0).cpu().numpy()
+                rgbn_25m_raw = super_tensor.squeeze(0).cpu().numpy()
 
                 # Zwolnienie pamięci VRAM
                 del tensor_in, super_tensor
@@ -103,6 +153,10 @@ def run_sen2sr_inference(
                     torch.cuda.empty_cache()
                 gc.collect()
 
+                # Gwarancja ścisłych wymiarów (channels, h_out, w_out)
+                rgbn_25m = np.zeros((channels, h_out, w_out), dtype=np.float32)
+                for c in range(channels):
+                    rgbn_25m[c] = align_raster_shape(rgbn_25m_raw[c], (h_out, w_out), order=1)
                 return np.clip(rgbn_25m, 0.0, 1.0).astype(np.float32)
         except Exception as infer_err:
             logger.warning(f"Błąd inferencji sen2sr ({infer_err}). Przełączanie na kafelkowy silnik gradientowy.")
@@ -114,9 +168,7 @@ def run_sen2sr_inference(
     for c in range(channels):
         band = rgbn_10m[c]
         # Interpolacja bikubiczna (spline order 3)
-        upscaled = zoom(band, SCALE_FACTOR_10M_TO_25M, order=3).astype(np.float32)
-        # Dopasowanie dokładnych wymiarów
-        upscaled = upscaled[:h_out, :w_out]
+        upscaled = align_raster_shape(band, (h_out, w_out), order=3).astype(np.float32)
 
         # Ekstrakcja wysokich częstotliwości (High-Pass Detail Sharpening)
         blurred = gaussian_filter(upscaled, sigma=1.0)
@@ -125,13 +177,13 @@ def run_sen2sr_inference(
 
         # Rygorystyczna konserwacja energii blokowej 4x4
         # Uśrednienie pikseli 2.5m w każdym oknie 4x4 musi być równe wyjściowemu pikselowi 10m
-        block_mean = zoom(
-            zoom(sharpened, 1.0 / SCALE_FACTOR_10M_TO_25M, order=1)[:h, :w],
-            SCALE_FACTOR_10M_TO_25M,
+        block_mean = align_raster_shape(
+            align_raster_shape(sharpened, (h, w), order=1),
+            (h_out, w_out),
             order=0
-        )[:h_out, :w_out]
+        )
 
-        orig_expanded = zoom(band, SCALE_FACTOR_10M_TO_25M, order=0)[:h_out, :w_out]
+        orig_expanded = align_raster_shape(band, (h_out, w_out), order=0)
         conserved = sharpened + (orig_expanded - block_mean)
         rgbn_25m[c] = np.clip(conserved, 0.0, 1.0)
 
@@ -143,18 +195,18 @@ def run_sen2sr_inference(
 
 
 # ==============================================================================
-# II. GEOSTATYSTYCZNA FUZJA ATPRK (AREA-TO-POINT REGRESSION KRIGING)
+# III. GEOSTATYSTYCZNA FUZJA ATPRK (AREA-TO-POINT REGRESSION KRIGING)
 # ==============================================================================
 
 def atprk_fusion_channel(
     coarse_band: np.ndarray,
     fine_predictors: np.ndarray,
-    scale_factor: int,
+    scale_factor: Optional[float] = None,
     psf_sigma: Optional[float] = None
 ) -> np.ndarray:
     """
     Dwustopniowa fuzja geostatystyczna ATPRK dla pojedynczego kanału niskorozdzielczego
-    (kanały 20 m S2 lub LST 10 m) do siatki 2.5 m.
+    do siatki 2.5 m (fine_predictors).
 
     Algorytm:
       a) Dopasowanie regresji wielozmiennej pomiędzy kanałem niskorozdzielczym a zagregowanymi
@@ -167,23 +219,25 @@ def atprk_fusion_channel(
     Parametry:
         coarse_band: Macierz wejściowa niskorozdzielcza (np. 20 m lub 10 m).
         fine_predictors: Zestaw pasm przewodzących w rozdzielczości 2.5 m (C, H_fine, W_fine).
-        scale_factor: Współczynnik skali (np. 8 dla 20m->2.5m, 4 dla 10m->2.5m).
-        psf_sigma: Odchylenie standardowe jądra PSF (domyślnie scale_factor / 2.355).
+        scale_factor: Współczynnik skali (opcjonalny, wyliczany dynamicznie z wymiarów siatki).
+        psf_sigma: Odchylenie standardowe jądra PSF sensora (domyślnie scale_factor / 2.355).
 
     Zwraca:
-        fine_fused: Zrekonstruowana macierz w rozdzielczości 2.5 m z zachowaniem energii.
+        fine_fused: Zrekonstruowana macierz w rozdzielczości 2.5 m z zachowaniem energii
+                    i wymiarami idealnie równymi (H_fine, W_fine).
     """
-    if psf_sigma is None:
-        psf_sigma = scale_factor / 2.355
-
     num_pred, h_fine, w_fine = fine_predictors.shape
     h_coarse, w_coarse = coarse_band.shape
 
-    # 1. Spatially Aggregate Predictors do rozdzielczości coarse za pomocą uśredniania blokowego
+    if scale_factor is None:
+        scale_factor = max(1.0, (h_fine / float(h_coarse) + w_fine / float(w_coarse)) / 2.0)
+    if psf_sigma is None:
+        psf_sigma = max(1.0, scale_factor / 2.355)
+
+    # 1. Agregacja przestrzenna predyktorów do siatki coarse_band
     coarse_preds = np.zeros((num_pred, h_coarse, w_coarse), dtype=np.float32)
     for p in range(num_pred):
-        downscaled = zoom(fine_predictors[p], 1.0 / scale_factor, order=1)
-        coarse_preds[p] = downscaled[:h_coarse, :w_coarse]
+        coarse_preds[p] = align_raster_shape(fine_predictors[p], (h_coarse, w_coarse), order=1)
 
     # 2. Dopasowanie wielowymiarowej regresji liniowej na poziomie coarse
     valid_mask = ~np.isnan(coarse_band)
@@ -191,8 +245,8 @@ def atprk_fusion_channel(
         valid_mask &= ~np.isnan(coarse_preds[p])
 
     if np.sum(valid_mask) < 20:
-        logger.warning("Zbyt mało poprawnych pikseli do regresji ATPRK. Użycie interpolacji dwukubicznej.")
-        return zoom(coarse_band, scale_factor, order=3)[:h_fine, :w_fine].astype(np.float32)
+        logger.warning("Zbyt mało poprawnych pikseli do regresji ATPRK. Użycie bezpośredniego resamplingu.")
+        return align_raster_shape(coarse_band, (h_fine, w_fine), order=3).astype(np.float32)
 
     # Macierz cech X [N x (P + 1)] z wyrazem wolnym
     X_train = np.column_stack([
@@ -222,20 +276,18 @@ def atprk_fusion_channel(
     coarse_residuals = np.where(valid_mask, coarse_band - coarse_trend, 0.0)
 
     # 5. Dyspersja reszt na siatkę 2.5 m z uwzględnieniem PSF (Point Spread Function)
-    # Dyspersja krigingowa modelowana przez interpolację i splot z jądrem PSF sensora
-    fine_residuals = zoom(coarse_residuals, scale_factor, order=1)[:h_fine, :w_fine]
+    fine_residuals = align_raster_shape(coarse_residuals, (h_fine, w_fine), order=1)
     fine_residuals_filtered = gaussian_filter(fine_residuals, sigma=psf_sigma)
 
-    # Wstępna rekonstrukcja
+    # Wstępna rekonstrukcja - kształty fine_trend i fine_residuals_filtered są ściśle równe (h_fine, w_fine)
     fine_estimated = fine_trend + fine_residuals_filtered
 
     # 6. Bezwzględna Konserwacja Energii Radiometrycznej (Pycnophylactic constraint)
-    # Wyznaczenie średniej blokowej zrekonstruowanego obrazu
-    down_est = zoom(fine_estimated, 1.0 / scale_factor, order=1)[:h_coarse, :w_coarse]
+    down_est = align_raster_shape(fine_estimated, (h_coarse, w_coarse), order=1)
     discrepancy = np.where(valid_mask, coarse_band - down_est, 0.0)
 
     # Dystrybucja różnic bilansowych do każdego piksela bloku
-    correction_grid = zoom(discrepancy, scale_factor, order=0)[:h_fine, :w_fine]
+    correction_grid = align_raster_shape(discrepancy, (h_fine, w_fine), order=0)
     fine_conserved = fine_estimated + correction_grid
 
     # Przycięcie ewentualnych ujemnych odbić dla pasm optycznych
@@ -246,7 +298,7 @@ def atprk_fusion_channel(
 
 
 # ==============================================================================
-# III. GŁÓWNA FUNKCJA KROKU 3: super_resolve_bands
+# IV. GŁÓWNA FUNKCJA KROKU 3: super_resolve_bands
 # ==============================================================================
 
 def super_resolve_bands(
@@ -259,7 +311,7 @@ def super_resolve_bands(
 
     Podnosi rozdzielczość pasm RGBN do 2.5 m za pomocą wag SEN2SR
     oraz wykonuje fuzję ATPRK dla kanałów 20 m i LST 10 m do siatki 2.5 m.
-    Zwraca słownik pasm w 2.5 m oraz zaktualizowany profil georeferencyjny.
+    Gwarantuje 100% zgodność georeferencyjną i spójność wymiarów rastrów co do piksela.
 
     Parametry:
         s2_bands: Słownik zawierający macierze kanałów Sentinel-2
@@ -282,7 +334,8 @@ def super_resolve_bands(
             raise KeyError(f"Brak wymaganego pasma 10m '{k}' w słowniku s2_bands.")
 
     h_10m, w_10m = s2_bands["B04"].shape
-    h_25m, w_25m = h_10m * SCALE_FACTOR_10M_TO_25M, w_10m * SCALE_FACTOR_10M_TO_25M
+    h_25m = int(h_10m * SCALE_FACTOR_10M_TO_25M)
+    w_25m = int(w_10m * SCALE_FACTOR_10M_TO_25M)
 
     # Złożenie tensora RGBN 10m
     rgbn_10m = np.stack([s2_bands[k] for k in rgbn_keys], axis=0).astype(np.float32)
@@ -290,6 +343,13 @@ def super_resolve_bands(
     # 2. Super-rozdzielczość SEN2SR dla pasm 10 m -> 2.5 m
     logger.info("Krok 3a: Podnoszenie rozdzielczości pasm RGBN (B02, B03, B04, B08) do 2.5 m...")
     rgbn_25m = run_sen2sr_inference(rgbn_10m)
+
+    # Gwarancja wymiaru (4, h_25m, w_25m)
+    if rgbn_25m.shape[1:] != (h_25m, w_25m):
+        rgbn_25m_aligned = np.zeros((4, h_25m, w_25m), dtype=np.float32)
+        for i in range(4):
+            rgbn_25m_aligned[i] = align_raster_shape(rgbn_25m[i], (h_25m, w_25m), order=1)
+        rgbn_25m = rgbn_25m_aligned
 
     bands_25m: Dict[str, np.ndarray] = {
         "B02": rgbn_25m[0],
@@ -306,23 +366,15 @@ def super_resolve_bands(
     for band_key in bands_20m_keys:
         if band_key in s2_bands:
             band_raw = s2_bands[band_key]
-            # Dopasowanie wymiaru kanału 20m do siatki 20m jeśli wejście miało inny rozmiar
-            target_h_20m = h_10m // 2
-            target_w_20m = w_10m // 2
-            if band_raw.shape != (target_h_20m, target_w_20m) and band_raw.shape != (h_10m, w_10m):
-                band_coarse = zoom(band_raw, (target_h_20m / band_raw.shape[0], target_w_20m / band_raw.shape[1]), order=1)
-            elif band_raw.shape == (h_10m, w_10m):
-                # Wejście było już w siatce 10m - agregujemy do 20m
-                band_coarse = zoom(band_raw, 0.5, order=1)
-            else:
-                band_coarse = band_raw
-
-            logger.info(f" -> ATPRK dla pasma {band_key} (skala x8, PSF sigma=3.4)...")
+            # Pasmo s2_bands może mieć wymiary siatki 10 m (z GEE) lub natywne 20 m.
+            # Bezpośrednio przekazujemy macierz do atprk_fusion_channel,
+            # która precyzyjnie estymuje skalę i PSF sensora 20 m (sigma=3.4 px w siatce 2.5 m)
+            logger.info(f" -> ATPRK dla pasma {band_key} (wymiary wejściowe: {band_raw.shape}, wyjściowe: {h_25m}x{w_25m})...")
             fused_25m = atprk_fusion_channel(
-                coarse_band=band_coarse,
+                coarse_band=band_raw,
                 fine_predictors=fine_predictors,
-                scale_factor=SCALE_FACTOR_20M_TO_25M,
-                psf_sigma=SCALE_FACTOR_20M_TO_25M / 2.355
+                scale_factor=None,
+                psf_sigma=3.4
             )
             bands_25m[band_key] = fused_25m
         else:
@@ -342,7 +394,7 @@ def super_resolve_bands(
     if "crop_mask" in s2_bands:
         logger.info("Krok 3e: Przeskalowanie maski upraw trwałych M_crop do siatki 2.5 m...")
         cm_10m = s2_bands["crop_mask"]
-        cm_25m = zoom(cm_10m, SCALE_FACTOR_10M_TO_25M, order=0)[:h_25m, :w_25m]
+        cm_25m = align_raster_shape(cm_10m, (h_25m, w_25m), order=0)
         bands_25m["crop_mask_25m"] = cm_25m.astype(np.float32)
 
     # 6. Fuzja ATPRK dla Trajektorii Fenologicznej HR-VPP PPI (10 m -> 2.5 m)
@@ -356,6 +408,7 @@ def super_resolve_bands(
         )
         bands_25m["ppi_25m"] = ppi_fused.astype(np.float32)
 
+    # Warstwy pomocnicze SWI i metadane
     if "swi_1km" in s2_bands:
         bands_25m["swi_1km"] = s2_bands["swi_1km"]
     if "swi_profile_8depths" in s2_bands:
@@ -365,13 +418,20 @@ def super_resolve_bands(
     if "ppi_qflag" in s2_bands:
         bands_25m["ppi_qflag"] = s2_bands["ppi_qflag"]
 
-    # 5. Aktualizacja Profilu Georeferencyjnego dla piksela 2.5 m
+    # Weryfikacja spójności wymiarów wszystkich wyjściowych rastrów 2D w 2.5 m
+    for band_name, band_arr in list(bands_25m.items()):
+        if isinstance(band_arr, np.ndarray) and band_arr.ndim == 2 and band_name not in ["swi_1km", "ppi_qflag"]:
+            if band_arr.shape != (h_25m, w_25m):
+                bands_25m[band_name] = align_raster_shape(band_arr, (h_25m, w_25m), order=1)
+
+    # 7. Aktualizacja Profilu Georeferencyjnego dla piksela 2.5 m
     logger.info("Krok 3d: Aktualizacja transformacji afinicznej profilu georeferencyjnego 2.5 m...")
     profile_25m = profile_10m.copy() if profile_10m else {}
 
-    orig_transform = profile_10m.get('transform', None)
+    orig_transform = profile_10m.get('transform', None) if profile_10m else None
     if orig_transform:
-        # Skalowanie macierzy afinicznej: piksel 4x mniejszy
+        # Skalowanie macierzy afinicznej: piksel dokładnie 4x mniejszy
+        # a = 10.0 -> 2.5, e = -10.0 -> -2.5
         new_a = orig_transform.a / float(SCALE_FACTOR_10M_TO_25M)
         new_e = orig_transform.e / float(SCALE_FACTOR_10M_TO_25M)
         new_transform = Affine(
@@ -386,6 +446,8 @@ def super_resolve_bands(
     profile_25m['height'] = int(h_25m)
     profile_25m['count'] = 1
     profile_25m['dtype'] = 'float32'
+    if 'crs' not in profile_25m or profile_25m['crs'] is None:
+        profile_25m['crs'] = profile_10m.get('crs', 'EPSG:32631')
 
     logger.info("================================================================================")
     logger.info("KROK 3 ZAKOŃCZONY POMYŚLNIE:")
@@ -398,18 +460,20 @@ def super_resolve_bands(
 
 
 # ==============================================================================
-# TEST SAMODZIELNY MODUŁU
+# V. TEST SAMODZIELNY MODUŁU
 # ==============================================================================
 if __name__ == "__main__":
-    print("Testowanie modułu step_03_super_resolve.py na syntetycznych danych...")
-    h, w = 40, 40
+    print("Testowanie modułu step_03_super_resolve.py na syntetycznych danych (w tym nieparzyste wymiary)...")
+    # Test na DOKŁADNIE takich nieparzystych wymiarach jak w GBOV Condom (h=381, w=344)
+    h, w = 381, 344
     mock_s2 = {
         "B02": np.random.uniform(0.02, 0.08, (h, w)).astype(np.float32),
         "B03": np.random.uniform(0.03, 0.12, (h, w)).astype(np.float32),
         "B04": np.random.uniform(0.04, 0.15, (h, w)).astype(np.float32),
         "B08": np.random.uniform(0.20, 0.50, (h, w)).astype(np.float32),
+        # Pasmo 20m o wymiarach zaokrąglonych w dół (190, 172) - dokładnie jak w problematycznym błędzie
         "B05": np.random.uniform(0.08, 0.20, (h // 2, w // 2)).astype(np.float32),
-        "B11": np.random.uniform(0.10, 0.30, (h // 2, w // 2)).astype(np.float32)
+        "B11": np.random.uniform(0.10, 0.30, (h, w)).astype(np.float32)
     }
     mock_lst = np.random.uniform(22.0, 32.0, (h, w)).astype(np.float32)
     mock_profile = {
@@ -421,5 +485,9 @@ if __name__ == "__main__":
 
     out_bands, out_prof = super_resolve_bands(mock_s2, mock_lst, mock_profile)
     print(" Sukces! Wymiary B04 w 2.5m:", out_bands["B04"].shape)
+    print(" Wymiary B05 (fuzja 20m) w 2.5m:", out_bands["B05"].shape)
     print(" Wymiary LST w 2.5m:", out_bands["LST_2.5m"].shape)
     print(" Nowy piksel transformacji:", out_prof['transform'].a)
+    assert out_bands["B05"].shape == (h * 4, w * 4), "B05 nie ma dokładnie wymiarów (1524, 1376)!"
+    assert out_bands["LST_2.5m"].shape == (h * 4, w * 4), "LST_2.5m nie ma dokładnie wymiarów (1524, 1376)!"
+    print(" Wszystkie asercje spójności wymiarów i georeferencji zaliczone!")
