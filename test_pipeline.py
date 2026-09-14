@@ -101,6 +101,34 @@ def run_integration_test():
     assert os.path.exists(report), "Raport Markdown nie zostal utworzony!"
     print("[OK] Krok 5 ZDANY. Utworzono pliki COG i raport walidacyjny.")
 
+    # Krok 6: Test Integracji ISMN i Protokołu QA4SM
+    print("\n--- Test Kroku 6: ISMN Portal API & Protokół ESA QA4SM ---")
+    from step_06_station_api import fetch_station_data, QA4SMValidator, run_station_validation_pipeline
+
+    df_station = fetch_station_data(
+        lat=43.9744,
+        lon=0.3361,
+        provider='ismn',
+        ismn_dir='data/7_isismn_data',
+        depth_range=(0.0, 0.05),
+        g_flag_only=True
+    )
+    assert not df_station.empty, "Brak danych in-situ ze stacji Condom!"
+    assert 'soil_moisture_m3m3' in df_station.columns, "Brak kolumny soil_moisture_m3m3!"
+    assert len(df_station) > 50000, f"Zbyt mała liczba rekordów: {len(df_station)}"
+    print(f"[OK] ISMN Interface: Odczytano {len(df_station)} rekordów in-situ (0.05 m, Flaga G).")
+
+    res_qa4sm = run_station_validation_pipeline({
+        "OUTPUT_DIR": "data/05_Final_Outputs",
+        "ISMN_DIR": "data/7_isismn_data",
+        "STATION_PROVIDER": "ismn"
+    })
+    assert res_qa4sm["status"] == "SUCCESS", "Błąd wykonania potoku QA4SM!"
+    assert os.path.exists(res_qa4sm["netcdf_path"]), "Brak wygenerowanego pliku NetCDF QA4SM!"
+    assert os.path.exists(res_qa4sm["plot_path"]), "Brak wygenerowanego wykresu QA4SM PNG!"
+    assert os.path.exists(res_qa4sm["report_path"]), "Brak raportu Markdown QA4SM!"
+    print(f"[OK] Krok 6 ZDANY. ubRMSE={res_qa4sm['metrics_tvdi']['ubrmse']:.4f} m3/m3, Pearson r={res_qa4sm['metrics_tvdi']['pearson_r']:.3f}")
+
     print("\n================================================================================")
     print("WSZYSTKIE TESTY JEDNOSTKOWE I INTEGRACYJNE ZAKONCZYLY SIE PELNYM SUKCESEM!")
     print("================================================================================")

@@ -1,0 +1,523 @@
+network_abbr;orig_flag_name;orig_flag_description
+BNZ-LTER;E;EstimatedMissing
+BNZ-LTER;Q;Questionable
+BNZ-LTER;M;Missing
+BNZ-LTER;G;Good
+COSMOS-UK;512;Spike - Data that are greater than a threshold value smaller/larger than the neighbouring values.If a value is greater than a certain threshold away from its neighbouring values this is removed.
+COSMOS-UK;1024;Error codes - Data where the logger programme has assigned an error code value due to a sensor/programme fault.When there is a fault with the sensor for some variables the logger programme can record a value of 7999.
+COSMOS-UK;M;Missing. Where data has been lost and not infilled.Note, for snow parameters, e.g. SNOW_DEPTH, the values are only given on snow days. This means there is no data on non-snow days, but it is not considered missing and will not have the M flag.
+COSMOS-UK;U;Unchecked. Where data had had no quality control (QC).Note, data that has been derived from QC’d data, e.g. net radiation, is not itself QC’d, however is still consider checked. The only truly unchecked data is the daily greenness proportion (GCC).
+COSMOS-UK;I;Infilled. Where missing data has been filled in directly using an infill method. See Section 5 for more details on infilling.
+COSMOS-UK;E;Estimated. Where the value contains some degree of uncertainty. This can be for one of two reasons:1. The value was aggregated with less than a full set of data. For example, a daily mean temperature where some of the sub daily values were missing.2. The value was aggregated or derived with some degree of infilled data. For example, if net radiation (RN) was calculated using an infilled SWIN value.
+COSMOS-UK;0;Good
+COSMOS-UK;8;Low power - Data recorded where battery voltage is low.Low battery power can mean measurements are missing or unreliable. If the battery pack voltage goes below 11V the associated data will be removed.
+COSMOS-UK;4;Too few sample - Data with too few half hourly samples.For variables that are a sum or average of numerous continuous readings in the preceding half hour period; if less than a third of these readings are missing the measurement is considered unreliable and data are removed.
+COSMOS-UK;2;Zero data - Data equal to zero where this is not a possible value.For certain variables missing data are marked using a zero.  For variables where this is true any zero values are removed as these are assumed to be missing.
+COSMOS-UK;1;Missing - No data received from logger.
+COSMOS-UK;16;Sensor fault - Data associated with a sensor that has a known fault. These are registered manually by the operations team.
+COSMOS-UK;32;Diagnostic flag - Data that has been assigned a diagnostic flag by the instrument.
+COSMOS-UK;64;Out of range - Data that are outside an acceptable range for that variable.Each variable measured at each site has a minimum and maximum value set. If the measurement of this particular variable goes out of this range it will be removed.
+COSMOS-UK;128;Secondary variable - Data dependant on another variable and the other variable is incorrect.Some measurements are dependent on the measurements of another variable being reasonable. For example measurements of the components of radiation are not reliable when the body temperature (of the radiometer) measurement is out of the acceptable range. This test will remove values from the dependent variables if the main variable is not correct.
+DWD;2;checked, value is not plausible
+DWD;-9999;no flag
+DWD;3;checked, value is plausible
+DWD;1;checked, value is wrong
+DWD;0;not checked
+IMA_CAN1;U;Unchecked
+IMA_CAN1;C;Checked manually
+KIHS_CMC;M;Missing
+KIHS_CMC;G;Good
+KIHS_SMC;M;Missing
+KIHS_SMC;G;Good
+MOL-RAO;U;Unchecked
+MOL-RAO;B;Bad
+MOL-RAO;I;Interpolated
+MOL-RAO;M;Missing
+MOL-RAO;D;Dubious
+MOL-RAO;G;Good
+RISMA;31;Good Data
+RISMA;None;no flag
+RISMA;STC_averaged_using_sensor_1_and_2-Frozen_soil;
+RISMA;11;Poor Data
+RISMA;STC_averaged_using_sensor_1_and_2-OK;
+RISMA;STC_averaged_using_1_and_2;activated when hydra probe sensor #3 does not measure soil temperature. The average soil temperature from sensor #1 and 2 is used instead. Occurs at some ON stations
+RISMA;CON_ge_0.2;activated when temperature corrected soil conductivity (CON) is equal to or larger than 0.2 S/m
+RISMA;3;Ice conditions affect record
+RISMA;21;Fair Data (more 10% different from average)
+RISMA;-2;Unusable Data
+RISMA;Out_of_RDC_range;activated when Real Dielectric Permittivity (RDC) is less than 2.4
+RISMA;Frozen_soil;activated if the soil temperature is below zero degrees Celsius and indicates that the soil moisture readings should not be used
+RISMA;DLT_ge_1.5;activated when the Dielectric Loss Tangent (DLT = Imaginary Dielectric Permittivity / RealDielectric Permittivity) is equal to or larger than 1.5
+RISMA;Out_of_WFV_average_range;activated if Soil Moisture value (m3/m3) is more than 10% different from the average, ie if there are sudden changes in soil moisture (these could be due to rain events or data noise; the flag is there to assist in interpretation along with rain gauge data)
+RISMA;Out_of_WFV_range;activated if the Soil Moisture (m3/m3) is less than 0.02 or greater than 0.60
+RISMA;OK;OK
+RISMA;NA;NA
+SCAN;N;No Assigned Profile: There is no existing delta/range profile for the data value, or the profiles are inactive. After data review, the N flags should be converted to V for valid, S for suspect, or E/K for an updated 
+SCAN;None;no flag
+SCAN;C;Correction: Assigned when a different multiplier or equation is applied to the sensor voltage (e.g. correcting for wrong transducer size, or unbiased temperature data).
+SCAN;V;Valid: Data value is within the limits of the Storage delta/range profile or determined to be valid through human review.
+SCAN;S;Suspect: Data value is outside the limits of the stored delta/range profile.
+SCAN;E;Edited: Data value is revised to correct for signal noise on an otherwise functioning sensor.
+SCAN;M;Missing: Assigned for to a null value.
+SCAN;K;Internal Estimate: Data value is revised using an estimate from other sensors or stations. Does not apply to data that are smoothed to adjust for minor sensor fluctuations which would receive the ‘E’ flag
+SNOTEL;None;no flag
+SNOTEL;K;Internal Estimate: Data value is revised using an estimate from other sensors or stations. Does not apply to data that are smoothed to adjust for minor sensor fluctuations which would receive the ‘E’ flag
+SNOTEL;C;Correction: Assigned when a different multiplier or equation is applied to the sensor voltage (e.g. correcting for wrong transducer size, or unbiased temperature data).
+SNOTEL;S;Suspect: Data value is outside the limits of the stored delta/range profile.
+SNOTEL;M;Missing: Assigned for to a null value.
+SNOTEL;V;Valid: Data value is within the limits of the Storage delta/range profile or determined to be valid through human review.
+SNOTEL;N;No Assigned Profile: There is no existing delta/range profile for the data value, or the profiles are inactive. After data review, the N flags should be converted to V for valid, S for suspect, or E/K for an updated 
+SNOTEL;E;Edited: Data value is revised to correct for signal noise on an otherwise functioning sensor.
+SOILSCAPE;4;(M) Missing
+SOILSCAPE;3;(B) Bad (Manually flagged)
+SOILSCAPE;0;(G) Good (Standard for all data)
+SOILSCAPE;1;(D) Dubious (Automatically flagged, spikes etc.)
+SOILSCAPE;2;(I) Interpolated / Estimated
+SOILSCAPE;5;(C) Exceeds field size (Negative SM values, fixed at 0.1 percent)
+TAHMO;2;Suspect
+TAHMO;4;Erroneous
+TAHMO;1;Good
+TAHMO;3;Doubtful
+TERENO;6_3017;checked automatically - suspicious_missing
+TERENO;4_3033;approved upload - suspicious - noisy data
+TERENO;4_3017;approved upload - suspicious - missing
+TERENO;nodata;no Data
+TERENO;4_4012;approved upload - baddata - max
+TERENO;4_1001;approved upload - unevaluated - unevaluated
+TERENO;4_4023;approved upload - baddata - frozen
+TERENO;4_4024;approved upload - baddata - bad quality
+TERENO;4_18;data level 2c "approved upload", generic flag "bad data", qualifierid "isolated spike"
+TERENO;4_3012;approved upload - suspicious - max
+TERENO;noData;no Data
+TERENO;4_2026;approved upload - ok - moderate quality
+TERENO;4_4011;approved upload - baddata - min
+TERENO;4_3044;approved upload - suspicious - no data change
+TERENO;4_3036;approved upload - suspicious - technical disturbance
+TERENO;4_19;data level 2c "approved upload", generic flag "bad data", qualifierid "sensor is out of order or delivers unplausible or meaningless data"
+TERENO;4_2;data level 2c "approved upload", generic flag "good or acceptable data", qualified "good or acceptable data"
+TERENO;4_2025;approved upload - ok - good quality
+TERENO;4_4022;approved upload - baddata - data not plausible
+TERENO;4_15;data level 2c "approved upload", generic flag "bad data", qualifierid "irregular data (NaN, infinite)"
+TERENO;4_3037;approved upload - suspicious - maintenance disturbance
+TERENO;4_4059;approved upload - baddata - max preciptiation 5d
+TERENO;4_3023;approved upload - suspicious - frozen
+TERENO;4_4021;approved upload - baddata - data transfer disturbed
+TERENO;4_2002;approved upload - ok - ok
+TERENO;4_4033;approved upload - baddata - noisy data
+TERENO;4_3011;approved upload - suspicious - min
+TERENO;4_4018;approved upload - baddata - out of order
+TERENO;4_4058;approved upload - baddata - max precipitation 2d
+TERENO;4_4020;approved upload - baddata - unplausible variation
+TERENO;4_4013;approved upload - baddata - irregular
+TERENO;4_4036;approved upload - baddata - technical disturbance
+TERENO;None;no Data
+TERENO;4_4019;approved upload - baddata - isolated spike
+TERENO;4_3020;approved upload - suspicious - unplausible variation
+TERENO;4_3014;approved upload - suspicious_unknown
+TERENO;6_4057;checked automatically - baddata_max preciptiation 24h
+TERENO;6_4058;checked automatically - baddata_max preciptiation 2d
+TERENO;6_4059;checked automatically - baddata_max preciptiation 5d
+TERENO;6_4069;checked automatically - baddata_sealinglip
+TERENO;6_4071;checked automatically - baddata_Analysis error
+TERENO;6_5005;checked automatically - gapfilled_gapfilled
+TERENO;6_5015;checked automatically - gapfilled_interpolated
+TERENO;6_5016;checked automatically - gapfilled_extrapolated
+TERENO;6_7007;checked automatically - modified_modified
+TERENO;6_7022;checked automatically - modified_data not plausible
+TERENO;6_7060;checked automatically - modified_drift corrected
+TERENO;5_1001;derived product - unevaluated_unevaluated
+TERENO;5_2002;derived product - ok_ok
+TERENO;5_3012;derived product - suspicious_max
+TERENO;5_3014;derived product - suspicious_unknown
+TERENO;5_4012;derived product - baddata_max
+TERENO;5_4020;derived product - baddata_unplausiblevariation
+TERENO;5_3048;derived product - suspicious_inconsistent time period
+TERENO;4_4004;approved upload - baddata_baddata
+TERENO;4_3003;approved upload - suspicious_suspicious
+TERENO;1_1001;unevaluated - unevaluated_unevaluated
+TERENO;1_1010;unevaluated - unevaluated_autosampler
+TERENO;1_1028;unevaluated - unevaluated_change sensor MPS
+TERENO;1_15014;unevaluated - interpolated_unknown
+TERENO;1_15015;unevaluated - interpolated_interpolated
+TERENO;1_15061;unevaluated - interpolated_linreg other station
+TERENO;1_15062;unevaluated - interpolated_replacedby other station
+TERENO;1_15063;unevaluated - interpolated_linreg DWD station
+TERENO;1_15064;unevaluated - interpolated_replacedby DWD station
+TERENO;1_15065;unevaluated - interpolated_spline time
+TERENO;1_15066;unevaluated - interpolated_linreg time
+TERENO;1_2002;unevaluated - ok_ok
+TERENO;1_2010;unevaluated - ok_autosampler
+TERENO;1_2025;unevaluated - ok_goodquality
+TERENO;1_2026;unevaluated - ok_moderatequality
+TERENO;1_2027;unevaluated - ok_qualityunknown
+TERENO;1_2067;unevaluated - ok_below detection limit
+TERENO;1_2068;unevaluated - ok_above detection limit
+TERENO;1_25025;unevaluated - goodquality_goodquality
+TERENO;1_25066;unevaluated - goodquality_linreg time
+TERENO;1_3003;unevaluated - suspicious_suspicious
+TERENO;1_3010;unevaluated - suspicious_autosampler
+TERENO;1_3011;unevaluated - suspicious_min
+TERENO;1_3012;unevaluated - suspicious_max
+TERENO;1_3014;unevaluated - suspicious_unknown
+TERENO;1_3017;unevaluated - suspicious_missing
+TERENO;1_3020;unevaluated - suspicious_unplausiblevariation
+TERENO;1_3023;unevaluated - suspicious_frozen
+TERENO;1_3028;unevaluated - suspicious_change sensor MPS
+TERENO;1_3029;unevaluated - suspicious_sensorchange
+TERENO;1_3033;unevaluated - suspicious_noisydata
+TERENO;1_3035;unevaluated - suspicious_changeflow/positionsensor
+TERENO;1_3036;unevaluated - suspicious_technicaldisturbance
+TERENO;1_3037;unevaluated - suspicious_maintenancedisturbance
+TERENO;1_3043;unevaluated - suspicious_backwater
+TERENO;1_3044;unevaluated - suspicious_nodatachange
+TERENO;1_3045;unevaluated - suspicious_leaking tank
+TERENO;1_3046;unevaluated - suspicious_check for sensor drift
+TERENO;1_3048;unevaluated - suspicious_inconsistent time period
+TERENO;1_3049;unevaluated - suspicious_tillage
+TERENO;1_3053;unevaluated - suspicious_sensor reports malfunction
+TERENO;1_3070;unevaluated - suspicious_Rewetting
+TERENO;1_4004;unevaluated - baddata_baddata
+TERENO;1_4010;unevaluated - baddata_autosampler
+TERENO;1_4011;unevaluated - baddata_min
+TERENO;1_4012;unevaluated - baddata_max
+TERENO;1_4013;unevaluated - baddata_irregular
+TERENO;1_4017;unevaluated - baddata_missing
+TERENO;1_4018;unevaluated - baddata_outoforder
+TERENO;1_4019;unevaluated - baddata_isolatedspike
+TERENO;1_4020;unevaluated - baddata_unplausiblevariation
+TERENO;1_4021;unevaluated - baddata_data transfer disturbed
+TERENO;1_4022;unevaluated - baddata_data not plausible
+TERENO;1_4023;unevaluated - baddata_frozen
+TERENO;1_4024;unevaluated - baddata_badquality
+TERENO;1_4028;unevaluated - baddata_change sensor MPS
+TERENO;1_4033;unevaluated - baddata_noisydata
+TERENO;1_4034;unevaluated - baddata_temperature effects
+TERENO;1_4035;unevaluated - baddata_changeflow/positionsensor
+TERENO;1_4036;unevaluated - baddata_technicaldisturbance
+TERENO;1_4037;unevaluated - baddata_maintenancedisturbance
+TERENO;1_4038;unevaluated - baddata_pumpfailure
+TERENO;1_4039;unevaluated - baddata_removablematter
+TERENO;1_4040;unevaluated - baddata_liquidapplication
+TERENO;1_4041;unevaluated - baddata_controlaffected
+TERENO;1_4042;unevaluated - baddata_tankrelease
+TERENO;1_4043;unevaluated - baddata_backwater
+TERENO;1_4047;unevaluated - baddata_ppleaking
+TERENO;1_4050;unevaluated - baddata_deadsignal
+TERENO;1_4051;unevaluated - baddata_noprecipitation
+TERENO;1_4052;unevaluated - baddata_waterwithdrawal
+TERENO;1_4054;unevaluated - baddata_manual deactivation
+TERENO;1_4055;unevaluated - baddata_max preciptiation 6h
+TERENO;1_4056;unevaluated - baddata_max preciptiation 12h
+TERENO;1_4057;unevaluated - baddata_max preciptiation 24h
+TERENO;1_4058;unevaluated - baddata_max preciptiation 2d
+TERENO;1_4059;unevaluated - baddata_max preciptiation 5d
+TERENO;1_4069;unevaluated - baddata_sealinglip
+TERENO;1_4071;unevaluated - baddata_Analysis error
+TERENO;1_5005;unevaluated - gapfilled_gapfilled
+TERENO;1_5015;unevaluated - gapfilled_interpolated
+TERENO;1_5016;unevaluated - gapfilled_extrapolated
+TERENO;1_7007;unevaluated - modified_modified
+TERENO;1_7022;unevaluated - modified_data not plausible
+TERENO;1_7060;unevaluated - modified_drift corrected
+TERENO;3_1001;visual inspected - unevaluated_unevaluated
+TERENO;3_1010;visual inspected - unevaluated_autosampler
+TERENO;3_1028;visual inspected - unevaluated_change sensor MPS
+TERENO;3_15014;visual inspected - interpolated_unknown
+TERENO;3_15015;visual inspected - interpolated_interpolated
+TERENO;3_15061;visual inspected - interpolated_linreg other station
+TERENO;3_15062;visual inspected - interpolated_replacedby other station
+TERENO;3_15063;visual inspected - interpolated_linreg DWD station
+TERENO;3_15064;visual inspected - interpolated_replacedby DWD station
+TERENO;3_15065;visual inspected - interpolated_spline time
+TERENO;3_15066;visual inspected - interpolated_linreg time
+TERENO;3_2002;visual inspected - ok_ok
+TERENO;3_2010;visual inspected - ok_autosampler
+TERENO;3_2025;visual inspected - ok_goodquality
+TERENO;3_2026;visual inspected - ok_moderatequality
+TERENO;3_2027;visual inspected - ok_qualityunknown
+TERENO;3_2067;visual inspected - ok_below detection limit
+TERENO;3_2068;visual inspected - ok_above detection limit
+TERENO;3_25025;visual inspected - goodquality_goodquality
+TERENO;3_25066;visual inspected - goodquality_linreg time
+TERENO;3_3003;visual inspected - suspicious_suspicious
+TERENO;3_3010;visual inspected - suspicious_autosampler
+TERENO;3_3011;visual inspected - suspicious_min
+TERENO;3_3012;visual inspected - suspicious_max
+TERENO;3_3014;visual inspected - suspicious_unknown
+TERENO;3_3017;visual inspected - suspicious_missing
+TERENO;3_3020;visual inspected - suspicious_unplausiblevariation
+TERENO;3_3023;visual inspected - suspicious_frozen
+TERENO;3_3028;visual inspected - suspicious_change sensor MPS
+TERENO;3_3029;visual inspected - suspicious_sensorchange
+TERENO;3_3033;visual inspected - suspicious_noisydata
+TERENO;3_3035;visual inspected - suspicious_changeflow/positionsensor
+TERENO;3_3036;visual inspected - suspicious_technicaldisturbance
+TERENO;3_3037;visual inspected - suspicious_maintenancedisturbance
+TERENO;3_3043;visual inspected - suspicious_backwater
+TERENO;3_3044;visual inspected - suspicious_nodatachange
+TERENO;3_3045;visual inspected - suspicious_leaking tank
+TERENO;3_3046;visual inspected - suspicious_check for sensor drift
+TERENO;3_3048;visual inspected - suspicious_inconsistent time period
+TERENO;3_3049;visual inspected - suspicious_tillage
+TERENO;3_3053;visual inspected - suspicious_sensor reports malfunction
+TERENO;3_3070;visual inspected - suspicious_Rewetting
+TERENO;3_4004;visual inspected - baddata_baddata
+TERENO;3_4010;visual inspected - baddata_autosampler
+TERENO;3_4011;visual inspected - baddata_min
+TERENO;3_4012;visual inspected - baddata_max
+TERENO;3_4013;visual inspected - baddata_irregular
+TERENO;3_4017;visual inspected - baddata_missing
+TERENO;3_4018;visual inspected - baddata_outoforder
+TERENO;3_4019;visual inspected - baddata_isolatedspike
+TERENO;3_4020;visual inspected - baddata_unplausiblevariation
+TERENO;3_4021;visual inspected - baddata_data transfer disturbed
+TERENO;3_4022;visual inspected - baddata_data not plausible
+TERENO;3_4023;visual inspected - baddata_frozen
+TERENO;3_4024;visual inspected - baddata_badquality
+TERENO;3_4028;visual inspected - baddata_change sensor MPS
+TERENO;3_4033;visual inspected - baddata_noisydata
+TERENO;3_4034;visual inspected - baddata_temperature effects
+TERENO;3_4035;visual inspected - baddata_changeflow/positionsensor
+TERENO;3_4036;visual inspected - baddata_technicaldisturbance
+TERENO;3_4037;visual inspected - baddata_maintenancedisturbance
+TERENO;3_4038;visual inspected - baddata_pumpfailure
+TERENO;3_4039;visual inspected - baddata_removablematter
+TERENO;3_4040;visual inspected - baddata_liquidapplication
+TERENO;3_4041;visual inspected - baddata_controlaffected
+TERENO;3_4042;visual inspected - baddata_tankrelease
+TERENO;3_4043;visual inspected - baddata_backwater
+TERENO;3_4047;visual inspected - baddata_ppleaking
+TERENO;3_4050;visual inspected - baddata_deadsignal
+TERENO;3_4051;visual inspected - baddata_noprecipitation
+TERENO;3_4052;visual inspected - baddata_waterwithdrawal
+TERENO;3_4054;visual inspected - baddata_manual deactivation
+TERENO;3_4055;visual inspected - baddata_max preciptiation 6h
+TERENO;3_4056;visual inspected - baddata_max preciptiation 12h
+TERENO;3_4057;visual inspected - baddata_max preciptiation 24h
+TERENO;3_4058;visual inspected - baddata_max preciptiation 2d
+TERENO;3_4059;visual inspected - baddata_max preciptiation 5d
+TERENO;3_4069;visual inspected - baddata_sealinglip
+TERENO;3_4071;visual inspected - baddata_Analysis error
+TERENO;3_5005;visual inspected - gapfilled_gapfilled
+TERENO;3_5015;visual inspected - gapfilled_interpolated
+TERENO;3_5016;visual inspected - gapfilled_extrapolated
+TERENO;3_7007;visual inspected - modified_modified
+TERENO;3_7022;visual inspected - modified_data not plausible
+TERENO;3_7060;visual inspected - modified_drift corrected
+TERENO;4_1010;approved upload - unevaluated_autosampler
+TERENO;4_1028;approved upload - unevaluated_change sensor MPS
+TERENO;4_15014;approved upload - interpolated_unknown
+TERENO;4_15015;approved upload - interpolated_interpolated
+TERENO;4_15061;approved upload - interpolated_linreg other station
+TERENO;4_15062;approved upload - interpolated_replacedby other station
+TERENO;4_15063;approved upload - interpolated_linreg DWD station
+TERENO;4_15064;approved upload - interpolated_replacedby DWD station
+TERENO;4_15065;approved upload - interpolated_spline time
+TERENO;4_15066;approved upload - interpolated_linreg time
+TERENO;4_2010;approved upload - ok_autosampler
+TERENO;4_2027;approved upload - ok_qualityunknown
+TERENO;4_2067;approved upload - ok_below detection limit
+TERENO;4_2068;approved upload - ok_above detection limit
+TERENO;4_25025;approved upload - goodquality_goodquality
+TERENO;4_25066;approved upload - goodquality_linreg time
+TERENO;4_3010;approved upload - suspicious_autosampler
+TERENO;4_3028;approved upload - suspicious_change sensor MPS
+TERENO;4_3029;approved upload - suspicious_sensorchange
+TERENO;4_3035;approved upload - suspicious_changeflow/positionsensor
+TERENO;4_3043;approved upload - suspicious_backwater
+TERENO;4_3045;approved upload - suspicious_leaking tank
+TERENO;4_3046;approved upload - suspicious_check for sensor drift
+TERENO;4_3049;approved upload - suspicious_tillage
+TERENO;4_3053;approved upload - suspicious_sensor reports malfunction
+TERENO;4_3070;approved upload - suspicious_Rewetting
+TERENO;4_4010;approved upload - baddata_autosampler
+TERENO;4_4017;approved upload - baddata_missing
+TERENO;4_4028;approved upload - baddata_change sensor MPS
+TERENO;4_4034;approved upload - baddata_temperature effects
+TERENO;4_4035;approved upload - baddata_changeflow/positionsensor
+TERENO;4_4037;approved upload - baddata_maintenancedisturbance
+TERENO;4_4038;approved upload - baddata_pumpfailure
+TERENO;4_4039;approved upload - baddata_removablematter
+TERENO;4_4040;approved upload - baddata_liquidapplication
+TERENO;4_4041;approved upload - baddata_controlaffected
+TERENO;4_4042;approved upload - baddata_tankrelease
+TERENO;4_4043;approved upload - baddata_backwater
+TERENO;4_4047;approved upload - baddata_ppleaking
+TERENO;4_4050;approved upload - baddata_deadsignal
+TERENO;4_4051;approved upload - baddata_noprecipitation
+TERENO;4_4052;approved upload - baddata_waterwithdrawal
+TERENO;4_4054;approved upload - baddata_manual deactivation
+TERENO;4_4055;approved upload - baddata_max preciptiation 6h
+TERENO;4_4056;approved upload - baddata_max preciptiation 12h
+TERENO;4_4057;approved upload - baddata_max preciptiation 24h
+TERENO;4_4069;approved upload - baddata_sealinglip
+TERENO;4_4071;approved upload - baddata_Analysis error
+TERENO;4_5005;approved upload - gapfilled_gapfilled
+TERENO;4_5015;approved upload - gapfilled_interpolated
+TERENO;4_5016;approved upload - gapfilled_extrapolated
+TERENO;4_7007;approved upload - modified_modified
+TERENO;4_7022;approved upload - modified_data not plausible
+TERENO;4_7060;approved upload - modified_drift corrected
+TERENO;5_1010;derived product - unevaluated_autosampler
+TERENO;5_1028;derived product - unevaluated_change sensor MPS
+TERENO;5_15014;derived product - interpolated_unknown
+TERENO;5_15015;derived product - interpolated_interpolated
+TERENO;5_15061;derived product - interpolated_linreg other station
+TERENO;5_15062;derived product - interpolated_replacedby other station
+TERENO;5_15063;derived product - interpolated_linreg DWD station
+TERENO;5_15064;derived product - interpolated_replacedby DWD station
+TERENO;5_15065;derived product - interpolated_spline time
+TERENO;5_15066;derived product - interpolated_linreg time
+TERENO;5_2010;derived product - ok_autosampler
+TERENO;5_2025;derived product - ok_goodquality
+TERENO;5_2026;derived product - ok_moderatequality
+TERENO;5_2027;derived product - ok_qualityunknown
+TERENO;5_2067;derived product - ok_below detection limit
+TERENO;5_2068;derived product - ok_above detection limit
+TERENO;5_25025;derived product - goodquality_goodquality
+TERENO;5_25066;derived product - goodquality_linreg time
+TERENO;5_3003;derived product - suspicious_suspicious
+TERENO;5_3010;derived product - suspicious_autosampler
+TERENO;5_3011;derived product - suspicious_min
+TERENO;5_3017;derived product - suspicious_missing
+TERENO;5_3020;derived product - suspicious_unplausiblevariation
+TERENO;5_3023;derived product - suspicious_frozen
+TERENO;5_3028;derived product - suspicious_change sensor MPS
+TERENO;5_3029;derived product - suspicious_sensorchange
+TERENO;5_3033;derived product - suspicious_noisydata
+TERENO;5_3035;derived product - suspicious_changeflow/positionsensor
+TERENO;5_3036;derived product - suspicious_technicaldisturbance
+TERENO;5_3037;derived product - suspicious_maintenancedisturbance
+TERENO;5_3043;derived product - suspicious_backwater
+TERENO;5_3044;derived product - suspicious_nodatachange
+TERENO;5_3045;derived product - suspicious_leaking tank
+TERENO;5_3046;derived product - suspicious_check for sensor drift
+TERENO;5_3049;derived product - suspicious_tillage
+TERENO;5_3053;derived product - suspicious_sensor reports malfunction
+TERENO;5_3070;derived product - suspicious_Rewetting
+TERENO;5_4004;derived product - baddata_baddata
+TERENO;5_4010;derived product - baddata_autosampler
+TERENO;5_4011;derived product - baddata_min
+TERENO;5_4013;derived product - baddata_irregular
+TERENO;5_4017;derived product - baddata_missing
+TERENO;5_4018;derived product - baddata_outoforder
+TERENO;5_4019;derived product - baddata_isolatedspike
+TERENO;5_4021;derived product - baddata_data transfer disturbed
+TERENO;5_4022;derived product - baddata_data not plausible
+TERENO;5_4023;derived product - baddata_frozen
+TERENO;5_4024;derived product - baddata_badquality
+TERENO;5_4028;derived product - baddata_change sensor MPS
+TERENO;5_4033;derived product - baddata_noisydata
+TERENO;5_4034;derived product - baddata_temperature effects
+TERENO;5_4035;derived product - baddata_changeflow/positionsensor
+TERENO;5_4036;derived product - baddata_technicaldisturbance
+TERENO;5_4037;derived product - baddata_maintenancedisturbance
+TERENO;5_4038;derived product - baddata_pumpfailure
+TERENO;5_4039;derived product - baddata_removablematter
+TERENO;5_4040;derived product - baddata_liquidapplication
+TERENO;5_4041;derived product - baddata_controlaffected
+TERENO;5_4042;derived product - baddata_tankrelease
+TERENO;5_4043;derived product - baddata_backwater
+TERENO;5_4047;derived product - baddata_ppleaking
+TERENO;5_4050;derived product - baddata_deadsignal
+TERENO;5_4051;derived product - baddata_noprecipitation
+TERENO;5_4052;derived product - baddata_waterwithdrawal
+TERENO;5_4054;derived product - baddata_manual deactivation
+TERENO;5_4055;derived product - baddata_max preciptiation 6h
+TERENO;5_4056;derived product - baddata_max preciptiation 12h
+TERENO;5_4057;derived product - baddata_max preciptiation 24h
+TERENO;5_4058;derived product - baddata_max preciptiation 2d
+TERENO;5_4059;derived product - baddata_max preciptiation 5d
+TERENO;5_4069;derived product - baddata_sealinglip
+TERENO;5_4071;derived product - baddata_Analysis error
+TERENO;5_5005;derived product - gapfilled_gapfilled
+TERENO;5_5015;derived product - gapfilled_interpolated
+TERENO;5_5016;derived product - gapfilled_extrapolated
+TERENO;5_7007;derived product - modified_modified
+TERENO;5_7022;derived product - modified_data not plausible
+TERENO;5_7060;derived product - modified_drift corrected
+TERENO;6_1001;checked automatically - unevaluated_unevaluated
+TERENO;6_1010;checked automatically - unevaluated_autosampler
+TERENO;6_1028;checked automatically - unevaluated_change sensor MPS
+TERENO;6_15014;checked automatically - interpolated_unknown
+TERENO;6_15015;checked automatically - interpolated_interpolated
+TERENO;6_15061;checked automatically - interpolated_linreg other station
+TERENO;6_15062;checked automatically - interpolated_replacedby other station
+TERENO;6_15063;checked automatically - interpolated_linreg DWD station
+TERENO;6_15064;checked automatically - interpolated_replacedby DWD station
+TERENO;6_15065;checked automatically - interpolated_spline time
+TERENO;6_15066;checked automatically - interpolated_linreg time
+TERENO;6_2002;checked automatically - ok_ok
+TERENO;6_2010;checked automatically - ok_autosampler
+TERENO;6_2025;checked automatically - ok_goodquality
+TERENO;6_2026;checked automatically - ok_moderatequality
+TERENO;6_2027;checked automatically - ok_qualityunknown
+TERENO;6_2067;checked automatically - ok_below detection limit
+TERENO;6_2068;checked automatically - ok_above detection limit
+TERENO;6_25025;checked automatically - goodquality_goodquality
+TERENO;6_25066;checked automatically - goodquality_linreg time
+TERENO;6_3003;checked automatically - suspicious_suspicious
+TERENO;6_3010;checked automatically - suspicious_autosampler
+TERENO;6_3011;checked automatically - suspicious_min
+TERENO;6_3012;checked automatically - suspicious_max
+TERENO;6_3014;checked automatically - suspicious_unknown
+TERENO;4_3048;approved upload - suspicious - inconsistent time period
+TERENO;6_3020;checked automatically - suspicious_unplausiblevariation
+TERENO;6_3023;checked automatically - suspicious_frozen
+TERENO;6_3028;checked automatically - suspicious_change sensor MPS
+TERENO;6_3029;checked automatically - suspicious_sensorchange
+TERENO;6_3033;checked automatically - suspicious_noisydata
+TERENO;6_3035;checked automatically - suspicious_changeflow/positionsensor
+TERENO;6_3036;checked automatically - suspicious_technicaldisturbance
+TERENO;6_3037;checked automatically - suspicious_maintenancedisturbance
+TERENO;6_3043;checked automatically - suspicious_backwater
+TERENO;6_3044;checked automatically - suspicious_nodatachange
+TERENO;6_3045;checked automatically - suspicious_leaking tank
+TERENO;6_3046;checked automatically - suspicious_check for sensor drift
+TERENO;6_3048;checked automatically - suspicious_inconsistent time period
+TERENO;6_3049;checked automatically - suspicious_tillage
+TERENO;6_3053;checked automatically - suspicious_sensor reports malfunction
+TERENO;6_3070;checked automatically - suspicious_Rewetting
+TERENO;6_4004;checked automatically - baddata_baddata
+TERENO;6_4010;checked automatically - baddata_autosampler
+TERENO;6_4011;checked automatically - baddata_min
+TERENO;6_4012;checked automatically - baddata_max
+TERENO;6_4013;checked automatically - baddata_irregular
+TERENO;6_4017;checked automatically - baddata_missing
+TERENO;6_4018;checked automatically - baddata_outoforder
+TERENO;6_4019;checked automatically - baddata_isolatedspike
+TERENO;6_4020;checked automatically - baddata_unplausiblevariation
+TERENO;6_4021;checked automatically - baddata_data transfer disturbed
+TERENO;6_4022;checked automatically - baddata_data not plausible
+TERENO;6_4023;checked automatically - baddata_frozen
+TERENO;6_4024;checked automatically - baddata_badquality
+TERENO;6_4028;checked automatically - baddata_change sensor MPS
+TERENO;6_4033;checked automatically - baddata_noisydata
+TERENO;6_4034;checked automatically - baddata_temperature effects
+TERENO;6_4035;checked automatically - baddata_changeflow/positionsensor
+TERENO;6_4036;checked automatically - baddata_technicaldisturbance
+TERENO;6_4037;checked automatically - baddata_maintenancedisturbance
+TERENO;6_4038;checked automatically - baddata_pumpfailure
+TERENO;6_4039;checked automatically - baddata_removablematter
+TERENO;6_4040;checked automatically - baddata_liquidapplication
+TERENO;6_4041;checked automatically - baddata_controlaffected
+TERENO;6_4042;checked automatically - baddata_tankrelease
+TERENO;6_4043;checked automatically - baddata_backwater
+TERENO;6_4047;checked automatically - baddata_ppleaking
+TERENO;6_4050;checked automatically - baddata_deadsignal
+TERENO;6_4051;checked automatically - baddata_noprecipitation
+TERENO;6_4052;checked automatically - baddata_waterwithdrawal
+TERENO;6_4054;checked automatically - baddata_manual deactivation
+TERENO;6_4055;checked automatically - baddata_max preciptiation 6h
+TERENO;6_4056;checked automatically - baddata_max preciptiation 12h
+TWENTE;9;data is not valid
+TWENTE;7;saturated plateau
+TWENTE;6;constant low values following negative breaks
+TWENTE;5;soil moisture jump detected using a spectrum based approach
+TWENTE;4;soil moisture drop detected using a spectrum based approach
+TWENTE;3;spike detected based on variance/mean, soil moisture change and second derivative criteria
+TWENTE;2;soil moisture above 0.7 m3/m3  or soil temperature above 50 oC
+TWENTE;1;soil moisture below 0.0 m3/m3  or soil temperature below -20 oC
+TWENTE;0;operates nominal
+USCRN;3;erroneous
+USCRN;0;good

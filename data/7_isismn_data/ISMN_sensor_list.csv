@@ -1,0 +1,190 @@
+sensor_name;measured_variable;sensor_ref_doc;sensor_producer;sensor_added_infos;sensor_label;measurement_principle;measurement_technique
+5TE;soil moisture, soil EC, soil temperature;http://publications.metergroup.com/Manuals/20435_5TE_Manual_Web.pdf;METER Group (former Decagon);;Meter-5TE;dielectric constant;FDR-Capacitance
+5TM;soil moisture, soil temperature;http://publications.metergroup.com/Manuals/20424_5TM_Manual_Web.pdf;METER Group (former Decagon);https://library.metergroup.com/Retired%20and%20Discontinued/Manuals/ECH2O-TEEC-TMv6-Operators-Manual-(discontinued).pdf;Meter-5TM;dielectric constant;FDR-Capacitance
+10HS;soil moisture;http://publications.metergroup.com/Manuals/20426_10HS_Manual_Web.pdf;METER Group (former Decagon);;Meter-10HS;dielectric constant;FDR-Capacitance
+CS615;soil moisture;https://s.campbellsci.com/documents/us/manuals/cs615.pdf;Campbell Scientific;https://www.electronics-tutorials.ws/waveforms/bistable.html;Campbell-CS615;dielectric constant;TDR
+CS616;soil moisture;https://s.campbellsci.com/documents/us/manuals/cs616.pdf;Campbell Scientific;bistable multivibrator, niedrigfrequenterer Puls als TDR1000?;Campbell-CS616;dielectric constant;TDR
+CS650;soil moisture;https://s.campbellsci.com/documents/us/manuals/cs650.pdf;Campbell Scientific;for high EC soils, loss-effect correction;Campbell-CS650;dielectric constant;TDR
+CS655;soil moisture;https://s.campbellsci.com/documents/us/manuals/cs650.pdf;Campbell Scientific;for high EC soils, loss-effect correction, short sensor;Campbell-CS655;dielectric constant;TDR
+EC-5;soil moisture;http://publications.metergroup.com/Manuals/20431_EC-5_Manual_Web.pdf;METER Group (former Decagon);70MHZ;Meter-EC5;dielectric constant;FDR-Capacitance
+Hydraprobe Analog;soil moisture, soil EC, soil temperature;https://www.stevenswater.com/resources/documentation/hydraprobe/HP_6_User_Manual.pdf;Stevens Water Inc.;e.g. for campbell loggers;Stevens-Hydraprobe-Analog;dielectric constant;FDR-Impedance
+Hydraprobe Digital Sdi-12;soil moisture, soil EC, soil temperature;https://www.stevenswater.com/resources/documentation/hydraprobe/HP_6_User_Manual.pdf;Stevens Water Inc.;;Stevens-Hydraprobe-Digital;dielectric constant;FDR-Impedance
+Trime;soil moisture, soil temperature;https://www.imko.de/wp-content/uploads/2021/02/2020_08_14_Manual_TRIME-PICO64-32_final.pdf;Imko;;Imko-TrimeTDR;dielectric constant;TDR
+Moisture Point PRB-K;soil moisture;http://www.esica.com/_docs/tb01.pdf;Environmental Sensors Inc.;profile sensor;ES-Moisture-Point;dielectric constant;TDR
+TDT;soil moisture, soil EC, soil temperature;https://acclima.com/wp-content/uploads/User-Manual-SDI-TDT-12-22.pdf;Acclima;mit SDI-12;Acclima-TDT;dielectric constant;TDT
+Teros10;soil moisture;http://publications.metergroup.com/Manuals/20788_TEROS10_Manual_Web.pdf;METER Group;70MHZ;Meter-Teros10;dielectric constant;FDR-Capacitance
+Teros12;soil moisture, soil EC, soil temperature;http://publications.metergroup.com/Manuals/20587_TEROS11-12_Manual_Web.pdf;METER Group;;Meter-Teros12;dielectric constant;FDR-Capacitance
+ThetaProbe ML2X;soil moisture;https://delta-t.co.uk/wp-content/uploads/2016/11/ML2-Thetaprobe-UM.pdf;Delta-T Devices;simplefied impedance;DeltaT-ThetaProbe-ML3;dielectric constant;FDR-Impedance
+ThetaProbe ML3;soil moisture, soil temperature;https://delta-t.co.uk/wp-content/uploads/2017/02/ML3-user-manual-version-2.1.pdf;Delta-T Devices;simplefied impedance;DeltaT-ThetaProbe-ML2x;dielectric constant;FDR-Impedance
+Spade;soil moisture, soil temperature;http://sceme.de/documents/Datasheet-SPADE-V3.06_en.pdf;Sceme.de;;Sceme-Spade-TDT;dielectric constant;TDT
+SoilVUE10;soil moisture, soil EC, soil temperature;https://s.campbellsci.com/documents/us/manuals/soilvue10.pdf;Campbell Scientific;;Campbell-SoilVUE10;dielectric constant;TDR
+SMT100;soil moisture, soil temperature;https://www.truebner.de/assets/download/Manual_SMT100_V1.0.pdf;Truebner;;Truebner-SMT100;dielectric constant;TDT
+100 Sensotec Transducer;snow water equivalent;;;selfmade 100 pillow with Sensotec Transducers;Sensotec-Transducer-100;;
+150 Sensotec Transducer;snow water equivalent;;;selfmade 150 pillow with Sensotec Transducers;Sensotec-Transducer-150;;
+200 Sensotec Transducer;snow water equivalent;;;selfmade 200 pillow with Sensotec Transducers;Sensotec-Transducer-200;;
+250 Sensotec Transducer;snow water equivalent;;;selfmade 250 pillow with Sensotec Transducers;Sensotec-Transducer-250;;
+50 Sensotec Transducer;snow water equivalent;;;selfmade 50 pillow with Sensotec Transducers;Sensotec-Transducer-50;;
+107;temperature;https://s.campbellsci.com/documents/us/manuals/107.pdf;Campbell Scientific;;Campbell-107;;
+109;temperature;https://s.campbellsci.com/documents/us/manuals/109.pdf;Campbell Scientific;;Campbell-109;;
+Tipping Bucket Rain Gauge Young;precipitation;https://www.youngusa.com/wp-content/uploads/2008/01/52202-9028K29.pdf;Young;;Young-rain-gauge;;
+6507A;temperature;https://www.unidata.com.au/wp-content/uploads/2019/01/Unidata-Manual-6507E-and-6535A-Temperature-Probes-15-01-2019.pdf;Unidata;;Unidata-6507A;;
+Rain Gauge;precipitation;https://www.th-friedrichs.de/en/products/rain/rain-gauge/rain-gauge/;Metek;;Metek-rain-gauge;;
+Classic Probe;soil moisture;https://aquacheckusa.com/probes/;AquaCheck;;AquaCheck-CP;dielectric constant;FDR-Capacitance
+ARG100;precipitation;https://s.campbellsci.com/documents/eu/manuals/arg100%20-%20078.pdf;Campbell Scientific;;Campbel-ARG100;;
+ATMOS 41;precipitation, humidity, temperature, atmospheric pressure;https://library.metergroup.com/Manuals/20635_ATMOS41_Manual_Web.pdf;METER Group (former Decagon);;Meter-ATMOS41;;
+Gypsum Block;soil moisture;http://mea.com.au/upload/Brochures/Soil%20Moisture%20Monitoring/Gypsum_Blocks_Web.pdf;Measurement Engineering;documentation outdated;ME-gypsum-block;matric potential;thermal conductivity
+Buriable Waveguide;soil moisture;http://www.soilmoisture.com/BURIABLE/;Soilmoisture Equipment Corp;generic sensor TRASE System?;SE-TDR;dielectric constant;TDR
+Unknown Campbell Sci;air temperatur, humidity;;Campbell Scientific;cs215?;Campbell-unknown;;
+CRS-1000/B;soil moisture;https://hydroinnova.com/_downloads/CRS1000_v3.pdf;Hydroinnova;;Hydroinnova-CRS-1000B;neutron sensing;CRNS
+CS215;air temperatur, humidity;https://s.campbellsci.com/documents/us/manuals/cs215.pdf;Campbell Scientific;;Campbell-CS215;;
+229;soil moisture;https://s.campbellsci.com/documents/us/manuals/229.pdf;Campbell Scientific;heat dissipation;Campbell-229;matric potential;thermal conductivity
+unknown soil temperature;soil temperature;;;custom made probe;CM-ST;;
+unknown coring device, auger;soil;;;;Gravimetric;mass balance;gravimetric
+Trase BE;soil moisture;https://www.soilmoisture.com/pdfs/Resource_Instructions_0898-6050_6050%20X3%20Mini%20Trase%20Kit%20Full%20Ops.Nov2012.pdf;;;Trase-BE;dielectric constant;TDR
+TDR100;soil moisture;https://s.campbellsci.com/documents/us/manuals/tdr100.pdf;Campbell Scientific;;Campbell-TDR100;dielectric constant;TDR
+TCAV;soil temperature;https://s.campbellsci.com/documents/us/manuals/tcav.pdf;Campbell Scientific;Averaging Soil Thermocouple Probe;Campbell-TCAV;;
+TB4;precipitation;https://s.campbellsci.com/documents/us/manuals/tb4-cs700.pdf;Campbell Scientific;;Campbell-TB4;;
+TA20;air temperatur, humidity;https://www.cae.it/upload/products/pdf/tu20/Termoigrometro_TU20.pdf;CAE;;CAE-TA20;;
+DS2;windspeed, winddirection;http://publications.metergroup.com/Integrator%20Guide/DS-2%20Integrator%20Guide.pdf;METER Group;sonic anemometer;Meter-DS2;;
+HD3910.1;soil moisture, soil temperature;https://www.deltaohm.com/wp-content/uploads/document/DeltaOHM_HD3910_datasheet_ENG.pdf;DeltaOHM;;DeltaOhm-HD3910;dielectric constant;FDR-Capacitance
+PR1;soil moisture;https://delta-t.co.uk/wp-content/uploads/2017/02/PR2_user_manual_version_5.0.pdf;Delta-T Devices;profile sensor, old version;DeltaT-PR1;dielectric constant;FDR-Capacitance
+PR2;soil moisture;https://delta-t.co.uk/wp-content/uploads/2017/02/PR2_user_manual_version_5.0.pdf;Delta-T Devices;profile sensor;DeltaT-PR2;dielectric constant;FDR-Capacitance
+TDR_MUX_MPTS;soil moisture;https://www.e-test.eu/uploads/5/4/4/3/54435037/manual_fommts_tdrmuxmpts_v1.41.pdf;E-TEST;;E-Test-TDR;dielectric constant;TDR
+Druck 0-69.4;;;;;Pressure-sensor;;
+EC-ET;;;;;EC-ET;;
+Tipping Bucket Rain Gauge Ecotech;precipitation;;Ecotech;;Ecotech-rain-gauge;;
+ECRN-100;precipitation;https://library.metergroup.com/Quick%20Start%20Guides/18292_ECRN-100_Web.pdf;METER Group;;Meter-ECRN-100;;
+EnviroSCAN;soil moisture;https://sentektechnologies.com/wp-content/uploads/2022/02/SEN5226_A4_EnviroSCAN_ProductBrochure_4LR_FINAL-1.pdf;Sentek;;Sentek-EnviroSCAN;dielectric constant;FDR-Capacitance
+EnviroSMART;soil moisture;https://s.campbellsci.com/documents/ca/manuals/envirosmart_man.pdf;Campbell Scientific / Sentek;;Sentek-EnviroSMART;dielectric constant;FDR-Capacitance
+External Temperature Sensors;;;;;Temperatur-unkown;;
+Flower Power;soil moisture;https://www.parrot.com/assets/s3fs-public/2021-09/flower-power_user-guide_uk.pdf;Parrot;;Parrot-flower-power;dielectric constant;FDR-Capacitance
+FM100;;;;;FM100;;
+FY-H2;soil moisture;;Fu Yuanfeike Co Ltd;;FY-H2;;
+FY-T1;air temperature;;Fu Yuanfeike Co Ltd;;FY-T1;;
+FY-T2;soil temperature;;Fu Yuanfeike Co Ltd;;FY-T2;;
+FY-Y2;precipitation;;Fu Yuanfeike Co Ltd;;FY-Y2;;
+smart Irrigation Control Sensor;soil moisture, soil temperature, air temperature;https://www.gardena.com/at/produkte/bewasserung/sprinklersystems/smart-irrigation-control-sensor-set/970658401/;Gardena;;Gardena-smartICS;;
+T200;precipitation;https://geonor.com/live/wp-content/uploads/2014/10/T-200B-US-Manual.-rev-10.10-20150128.pdf;Geonor;vibrating wire;Geonor-T200;;
+GPS;;;;;GPS;;
+GS1;soil moisture;https://library.metergroup.com/Manuals/14640_GS1_Web.pdf;METER Group (former Decagon);wie Teros10?;Meter-GS1;dielectric constant;FDR-Capacitance
+GS3;soil moisture, soil EC, soil temperature;https://library.metergroup.com/Manuals/20429_GS3_Web.pdf;METER Group (former Decagon);wie Teros12?;Meter-GS3;dielectric constant;FDR-Capacitance
+HC2S3;air temperatur, humidity;https://s.campbellsci.com/documents/us/manuals/hc2s3.pdf;Campbell Scientific;;Campbell-HC2S3;;
+HC-S3;air temperatur, humidity;https://s.campbellsci.com/documents/ca/manuals/hc-s3_man.pdf;Campbell Scientific;;Campbell-HC-S3;;
+HMP155;air temperatur, humidity;https://s.campbellsci.com/documents/eu/manuals/hmp155a%20-%20868.pdf;Campbell Scientific / Vaisala;;Campbell-HMP155;;
+HMP35C;air temperatur, humidity;https://s.campbellsci.com/documents/us/manuals/hmp35c.pdf;Campbell Scientific / Vaisala;;Campbell-HMP35C;;
+HMP45C;air temperatur, humidity;https://s.campbellsci.com/documents/us/manuals/hmp45c.pdf;Campbell Scientific / Vaisala;;Campbell-HMP45C;;
+HMP60;air temperatur, humidity;https://s.campbellsci.com/documents/eu/manuals/hmp60%20-%20896.pdf;Campbell Scientific;;Campbell-HMP60;;
+Tipping Bucket Rain Gauge HOBO;precipitation, temperatur;https://www.hobodataloggers.com.au/Attachment/DownloadFile?downloadId=2060;HOBO logging;;HOBO-rain-gauge;;
+HT785;air temperatur, humidity;http://www.sensordata.nl/wp-content/uploads/2017/02/Manual_785.pdf;Sensor Data bv;;bv-HT785;;
+HygroClip 2 (HC2);air temperatur, humidity;https://www.rotronic.com/pub/media/productattachments/files/E-M-HC2_Probes-V1_39_1.pdf;Rotronic AG / Vaisala;;Rotronic-Hygroclip2;;
+IRTS;temperatur;https://s.campbellsci.com/documents/us/manuals/irts.pdf;Campbell Scientific;infrared sensor;Campbell-IRTS;;
+Ultrasonic Snow Depth Sensor;snow depth;http://juddcom.com/;Judd Communications LLC;;Judd-ultrasonic;;
+Tipping Bucket Rain Gauge LAMBRECHT;precipitation;https://www.lambrecht.net/upload/manuals/15189_Manual.pdf;LAMBRECHT meteo GmbH;;Lambrecht-rain-gauge;;
+Temperatur sensor;air temperature;;LI-COR;;LICOR-temp;;
+LVDSC12;soil moisture;;Xin Lvyuan Co Ltd;;XL-LVDSC12;;
+LVDWZ31;soil temperature;;Xin Lvyuan Co Ltd;;XL-LVDWZ31;;
+LVQSZ33;air temperature;;Xin Lvyuan Co Ltd;;XL-LVQSZ33;;
+LVYLC02;precipitation;;Xin Lvyuan Co Ltd;;XL-LVYLC02;;
+Rain gauge;precipitation;Met One;;;MetOne-rain-gauge;;
+Model;;;;;Model;;
+MP100A;air temperatur, humidity;https://s.campbellsci.com/documents/de/product-brochures/mp100a_mar09.pdf;Campbell Scientific;;Campbell-MP100A;;
+NOAH;precipitation;https://www.etisensors.com/noah-gauges;ETI Instrument Systems, Inc.;;ETI-rain-gauge;;
+Tipping Bucket 260-2500 E-12;precipitation;https://novalynx.com/manuals/260-2500-manual.pdf;NovaLynx Corporation;;NovaLynx-rain-gauge;;
+no sensor specified;no sensor specified;no sensor specified;no sensor specified;no sensor specified;not-specified;;
+OTT Pluvio2 S;precipitation;https://images.otthydromet.com/asset-get.download.jsa?code=1264592;OTT Hydromet;;OTT-Pluvio2S;;
+OTT Pluvio2 S amount;precipitation - Amount;https://images.otthydromet.com/asset-get.download.jsa?code=1264592;OTT Hydromet;same sensor - different parameter;OTT-Pluvio2S-amount;;
+OTT Pluvio2 S volume;precipitation  - Volume;https://images.otthydromet.com/asset-get.download.jsa?code=1264592;OTT Hydromet;;OTT-Pluvio2S-volume;;
+pF-Meter;;;;;pF-meter;;
+PT1000;temperature;https://www.ncei.noaa.gov/pub/data/uscrn/documentation/site/sensors/airtemperature/Descriptions/AirTemp_ThermometricsPT1000PRT.pdf;Thermometrics Corporation;;TC-PT1000;;
+PMB2;precipitation;https://www.cae.it/upload/products/pdf/pmb2/Rain_Gauge_PMB2.pdf;CAE;;CAE-rain-gauge;;
+PT 100;air temperature;https://www.pentronic.se/wp-content/uploads/2019/05/09-4-new-standard-for-pt100-sensors-is-an-update-to-todays-reality.pdf;Pentronic;;Pentronic-PT100;;
+Pulse Count;;;;;Pulse-count;;
+PULSIA-7M3;;;;;PULSIA-7M3;;
+PWD22;precipitation;https://docs.vaisala.com/v/u/B210385EN-F/en-US;Vaisala;scatterometer, also precipitation type;Vaisala-PWD22;;
+QMR102;precipitation;https://www.vaisala.com/sites/default/files/documents/QMR101-QMR101M-Datasheet-B211713EN.pdf;Vaisala;;Vaisala-QMR102;;
+QMT103;soil temperature;https://docs.vaisala.com/v/u/B211080EN-E/en-US;Vaisala;;Vaisala-QMR103;;
+Raincap Weather Transmitter WXT510;precipitation;https://www.vaisala.com/sites/default/files/documents/WXT510_User_Guide_in_English.pdf;Vaisala;;Vaisala-WXT510;;
+Rain Gauge RG2;precipitation;https://delta-t.co.uk/wp-content/uploads/2016/10/RG2-Raingauge-Sensor-UM.pdf;Delta-T Devices;;DeltaT-RG2;;
+REC-1 Rain Gauge Sensor;Volumetric Water Content, Electrical Conductivity, and Temperature;https://publications.metergroup.com/Integrator%20Guide/REC-1%20Integrator%20Guide.pdf;METER Group (former Decagon);;Meter-REC-1;;
+Sei;;;;;SEI;;
+SMF;soil moisture;;;;SMF;;
+SMG;soil moisture;;;;SMG;;
+SMH;soil moisture;;;;SMH;;
+SMP1;soil moisture;;Radiation and Energy Balance Systems, Inc.;;SMP1;dielectric constant;FDR-Capacitance
+SMPM;soil moisture;;;;SMPM;;
+Snow Scales SSG 200;snow water equivalent;https://www.sommer.at/en/products/snow-ice/snow-scales-ssg-2/download/126_6f2e3cee6b24cb50532594f5dcdb09ed;Sommer Messtechnik;;Sommer-SSG200;;
+SoilMoisture-AverageSensor;soil moisture;;;;SM-unkown-average;;
+Solo 40;soil moisture;http://www.sdec-france.com/;SDEC;;SDEC-Solo40;;
+SR50;snow depth;https://s.campbellsci.com/documents/ca/manuals/sr50_man.pdf;Campbell Scientific;Sonic ranging sensor;Campbell-SR50;;
+SR50A;snow depth;https://s.campbellsci.com/documents/us/manuals/sr50a-series.pdf;Campbell Scientific;Sonic ranging sensor;Campbell-SR50a;;
+S-RGA-M002;precipitation;https://www.onsetcomp.com/sites/default/files/resources-documents/14091-H%20S-RGAB%20Manual.pdf;Onset;rain gauge;Onset-RGA;;
+Smart BHT;air temperature, pressure, humidity;https://www.stevenswater.com/resources/datasheets/Smart-BHT_web.pdf;Stevens Water Inc.;;Stevens-BHT;;
+S-THB-M002;air temperature, humidity;https://www.onsetcomp.com/sites/default/files/resources-documents/11427-O%20S-THB%20Manual.pdf;Onset;;Onset-THB;;
+STP01;soil temperature;https://www.hukseflux.com/uploads/product-documents/STP01_manual_v2028.pdf;Hukseflux;;Hukseflux-STP01;;
+STP-1;soil temperature;;Radiation and Energy Balance Systems, Inc.;;REB-STP1;;
+Sutron daily averages;soil moisture, air temperature;;Sutron;;Sutron-daily-averages;;
+TE525;precipitation;https://s.campbellsci.com/documents/br/manuals/te525.pdf;Campbell Scientific;rain gauge;Campbell-TE525;;
+LTN-44212;Temperature;;;;LTN-44212;;
+STS-212-PVC;Temperature;;;;STS-212-PVC;;
+temperature_vertical_rod_daily_averages;soil temperature;;NVE (partly);;Soil-Temp-daily-averages;;
+Tipping Bucket Rain Gauge Precis;precipitation;https://www.precis-mecanique.com/specialites/precipitations-cumul-detection.html;Precis mecanique;rain gauge;PM-rain-gauge;;
+Troxler Neutron Depth Probe;;;Troxler Electronic Laboratories;;Troxler-Neutron-Depth-Probe;;
+Troxler Neutron Surface Probe;;;Troxler Electronic Laboratories;;Troxler-Neutron-Surface-Probe;;
+TRWS 200E;precipitation;https://meteoradar.ch/de/trws_prospekt.pdf;MPS Systems;rain gauge;MPS-TRWS200E;;
+TU20;air temperature, humidity ;http://www.cae.it/upload/products/pdf/tu20_en.pdf;CAE;Thermo-hygrometer;CAE-TU20;;
+Type T Thermocouple;soil temperature;;home-made;;T-Termocouple;;
+Th3-s;Soil temperature profile probe;https://www.ecosearch.info/sites/default/files/prodotto_scheda_tecnica/Th3-s_Manual.pdf;UMS;soil temperature;UMS-Th3s;;
+WXT531 daily averages;precipitation;WXT530-User-Guide-in-English-M211840EN-G.pdf;Vaisala;;Vaisala-WXT531-daily-averages;;
+Vitel;Used in the mid 90"s;;Stephens Water Inc. ;;Stephens-Vitel;;
+VP-3;Vapor Pressure, Humidity, Temperature, and Atmospheric Pressure;https://publications.metergroup.com/Integrator%20Guide/VP-3%20Integrator%20Guide.pdf;METER Group (former Decagon);;Meter-VP3;;
+VP-4;Vapor Pressure, Humidity, Temperature, and Atmospheric Pressure;https://ekotechnika.cz/sites/default/files/pdf/vp-4_integrators_guide.pdf;METER Group (former Decagon);;Meter-VP4;;
+VRG101;precipitation;https://brj.dk/wp-content/uploads/2013/09/VRG101-Datasheet-English.pdf;Vaisala;rain gauge;Vaisala-VRG101;;
+WaterScout SM100;Soil Moisture;https://www.specmeters.com/assets/1/7/6460_SM100_(web).pdf;Spectrum Technologies;;Spectrum-WaterScoutSM100;dielectric constant;FDR-Capacitance
+T-200B;precipitation;https://www.ncei.noaa.gov/pub/data/uscrn/documentation/site/sensors/precipitation/Descriptions/Precip_GeonorT-200B.pdf;Geonor, Inc.;Weighing bucket precipitation gauge ;Geonor-T200b;;
+PT-100;Temperature;https://www.temperatur.com/fileadmin/inhalte/Download/Kataloge/tmg_Standardfuehler_und_Sonderloesungen.pdf;TMG;resistance thermometer;TMG-PT100;;
+WXT520;air temperature, precipitation;https://www.vaisala.com/sites/default/files/documents/M210906EN-C.pdf;Vaisala;more parameters;Vaisala-WXT520;;
+44211 A;air temperature;https://www.nrcs.usda.gov/sites/default/files/2023-05/Final_Temperature_Correction_Study05262023.pdf;YSI;;YSI-4421A;;
+CS700H;precipitation;https://s.campbellsci.com/documents/us/manuals/tb4-cs700.pdf;Campbell Scientific;heated rain gage;Campbell-CS700H;;
+Teros 21;Soil water potential;https://library.metergroup.com/Manuals/20854_TEROS21_Gen2_Manual_Web.pdf;METER Group (formally Decagon Devices);;Meter-Teros21;;
+HMP45;air temperature, humidity;https://www.vaisala.com/sites/default/files/documents/HMI41_and_HMP41_45_46_User_Guide_in_English.pdf;Vaisala;;Vaisala-HMP45;;
+CS125;weather, visibility;https://s.campbellsci.com/documents/ca/manuals/cs125_man.pdf;Campbell Scientific;forward scattering weather sensor;Campbell-CS125;;
+SBS-500;Tipping Bucket Rain Gauge;http://www.emltd.net/uploads/1/0/5/1/105135655/ds-780-400-sbs.pdf;EML;;EML-SBS500;;
+DS18B20;temperature;https://www.analog.com/media/en/technical-documentation/data-sheets/ds18b20.pdf;Maxim Integrated Products;;MIP-DS18B20;;
+HygroVUE10;air temperature, humidity;https://s.campbellsci.com/documents/us/manuals/hygrovue10.pdf;Campbell Scientific;;Campbell-HygroVUE10;;
+LSE01;soil moisture, soil temperature;LSE01-LoRaWAN Soil Moisture & EC Sensor User Manual.pdf;Dragino Technology;;Dragino-LSE01;dielectric constant;FDR
+RG1;precipitation;Adcon_RG1_Rain_Gauge__200cm2__0.2mm.pdf;Adcon;rain gauge;ADCON-RG1;;
+Drill and drop;soil moisture;https://sentektechnologies.com/download/sentek-drill-drop-probe-manual/;Sentek;;Sentek-DaD;dielectric constant;FDR-Capacitance
+SnowVue 10;snow depth;https://s.campbellsci.com/documents/us/manuals/snowvue10.pdf;Campbell Scientific;;Campbell-SnowVue10;;
+ST-300;air temperature;https://www.apogeeinstruments.com/content/ST-100-110-200-300-manual.pdf;Apogee Instruments;;Apogee-ST300;;
+USH-9;snow depth;Datasheet-USH-9-2.52.07.pdf;Sommer;;Sommer-USH9;;
+KT15.82 IIP;surface temperature;https://www.heitronics.com/wp-content/uploads/KT15.82-IIP-Datenblatt-DE.pdf;Heitronics;infrared temperature sensor;Heitronics-KT1582;;
+TRIME-ES P2;soil moisture;Trime TDR-Sonden (20141028093553843).pdf;IMKO;;Imko-TrimeP2;dielectric constant;TDR
+MR3;precipitation;https://meteoservis.cz/datasheet/MR3%28H%29XX_2017_ENG1.pdf;METEOSERVIS;Tipping bucket raingauge;METEOSERVIS-MR3;;
+Hydraprobe Analog (2.5 Volt) average;soil moisture, soil EC, soil temperature;https://www.stevenswater.com/resources/documentation/hydraprobe/HP_6_User_Manual.pdf;Stevens Water Inc.;e.g. for campbell loggers;Stevens-Hydraprobe-A1-average;dielectric constant;FDR-Impedance
+Hydraprobe Analog (2.5 Volt) area-weighted-average;soil moisture, soil EC, soil temperature;https://www.stevenswater.com/resources/documentation/hydraprobe/HP_6_User_Manual.pdf;Stevens Water Inc.;e.g. for campbell loggers;Stevens-Hydraprobe-A1-area-weighted;dielectric constant;FDR-Impedance
+PR2-daily_averages;soil moisture;https://delta-t.co.uk/wp-content/uploads/2017/02/PR2_user_manual_version_5.0.pdf;Delta-T Devices;profile sensor;DeltaT-PR2-daily-averages;dielectric constant;FDR-Capacitance
+Unknown Campbell Sci-daily_averages;air temperatur, humidity;;Campbell Scientific;cs215?;Campbell-unknown-daily-averages;;
+Th3-s-daily_averages;Soil temperatur profile probe;https://www.ecosearch.info/sites/default/files/prodotto_scheda_tecnica/Th3-s_Manual.pdf;UMS;;UMS-Th3s-daily-averages;;
+PT 100-daily_averages;air temperature;https://www.pentronic.se/wp-content/uploads/2019/05/09-4-new-standard-for-pt100-sensors-is-an-update-to-todays-reality.pdf;Pentronic;;Pentronic-PT100-daily-averages;;
+CS616-daily_averages;soil moisture;https://s.campbellsci.com/documents/us/manuals/cs616.pdf;Campbell Scientific;bistable multivibrator, niedrigfrequenterer Puls als TDR1000?;Campbell-CS616-daily-averages;dielectric constant;TDR
+CS650-daily_averages;soil moisture;https://s.campbellsci.com/documents/us/manuals/cs650.pdf;Campbell Scientific;for high EC soils, loss-effect correction;Campbell-CS650-daily-averages;dielectric constant;TDR
+Hydraprobe Analog (2.5 Volt)-daily-averages;soil moisture, soil EC, soil temperature;https://www.stevenswater.com/resources/documentation/hydraprobe/HP_6_User_Manual.pdf;Stevens Water Inc.;e.g. for campbell loggers;Stevens-Hydraprobe-A1-daily-averages;dielectric constant;FDR-Impedance
+PR1-daily-averages;soil moisture;https://delta-t.co.uk/wp-content/uploads/2017/02/PR2_user_manual_version_5.0.pdf;Delta-T Devices;profile sensor, old version;DeltaT-PR1-daily-averages;dielectric constant;FDR-Capacitance
+T200-daily-averages;precipitation;https://geonor.com/live/wp-content/uploads/2014/10/T-200B-US-Manual.-rev-10.10-20150128.pdf;Geonor;vibrating wire;Geonor-T200-daily-averages;;
+5TM-daily-averages;soil moisture, soil temperature;http://publications.metergroup.com/Manuals/20424_5TM_Manual_Web.pdf;METER Group (former Decagon);https://library.metergroup.com/Retired%20and%20Discontinued/Manuals/ECH2O-TEEC-TMv6-Operators-Manual-(discontinued).pdf;Meter-5TM-daily-averages;dielectric constant;FDR-Capacitance
+air-temperatur;air temperature;;Davis;;Davis-air-temperature;;
+SR50AT;air temperature;https://s.campbellsci.com/documents/ca/manuals/sr50_man.pdf;Campbell Scientific;;Campbell-SR50-AT;;
+WZ;soil moisture;;Centre for Water Informatics and Technology, LUMS, Lahore, Pakistan;;WZ-SM;;
+ORCH S4;air temperature;https://files.seeedstudio.com/wiki/Orch_S4_Weather_Station/SenseCAP_ORCH_S4-DataSheet.pdf;SenseCap;;SenseCap-ORCHS4;;
+TP500;precipitation;https://www.siapmicros.com/wp-content/uploads/2022/12/TP500_TP1000-ENG-1.pdf;SIAP and MICROS;rain gauge;SIAP-MICROS-TP500;;
+HD3910.1.5;soil moisture, soil temperature;https://environmental.senseca.com/product/hd3910-1-hd3910-2-soil-volumetric-water-content/;Senseca;;Senseca-HD3910;dielectric constant;FDR-Capacitance
+RG50;precipitation;https://ugt-online.de/loesungen/niederschlagsensor-rg-50/;UGT;rain gauge;UGT-RG50;;
+Rain Gauge;precipitation;https://fischer-barometer.de/media/pdf/d8/72/45/D441301_08.pdf?srsltid=AfmBOopDMRlRLVye6A5f_vIq3f-rvqw6r5R56L0SkvJQp1vvwYRc790J;Fischer;Rain Gauge;Fischer-Rain-Gauge;;
+SHT85;air temperature and humidity;https://sensirion.com/media/documents/4B40CEF3/640B2346/Sensirion_Humidity_Sensors_SHT85_Datasheet.pdf;Sensirion;;Sensirion-SHT85;;
+SHT75;air temperature and humidity;https://sensirion.com/media/documents/9A2ADC83/61642805/Sensirion_Humidity_Sensors_SHT7x_Datasheet.pdf;Sensirion;;Sensirion-SHT75;;
+MS5534C;barometric pressure;https://www.amsys.de/downloads/data/MS5534C-AMSYS-datasheet.pdf;Amsys;;Amsys-MS5534C;;
+ECH20-TE;Soil Moisture,  Soil Temperature;https://envcoglobal.com/wp-content/uploads/2014/10/5te-manual-08.pdf;Decagon Devives;;Decagon-ECH20-TE;dielectric constant;FDR-Capacitance
+CS106;barometric pressure;https://s.campbellsci.com/documents/us/manuals/cs106.pdf;Campbell Scientific;;Campbell-CS105;;
+SHM31;snow depth;Lufft_Snow_Depth_Sensor_SHM31.pdf;Lufft;;Lufft-SHM31;;
+YPT8;air temperature;https://thermx.com/wp-content/uploads/2023/11/Transition-Thermistor-Probe.pdf;ThermX;;ThermX-YPT8;;
+TEROS11;soil moisture, soil EC, soil temperature;http://publications.metergroup.com/Manuals/20587_TEROS11-12_Manual_Web.pdf;METER Group;;Meter-Teros11;dielectric constant;FDR-Capacitance

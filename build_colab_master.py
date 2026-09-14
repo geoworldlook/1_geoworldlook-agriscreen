@@ -121,7 +121,8 @@ dirs = [
     'data/03_Copernicus_Auxiliary',
     'data/04_Upscaled_LST_10m',
     'data/05_Final_Outputs',
-    'data/06_Landsat_Validation'
+    'data/06_Landsat_Validation',
+    'data/7_isismn_data'
 ]
 for d in dirs:
     os.makedirs(os.path.join(PROJECT_DIR, d), exist_ok=True)
@@ -133,6 +134,7 @@ expected_files = [
     'step_03_super_resolve.py',
     'step_04_metrics_alert.py',
     'step_05_colab_run.py',
+    'step_06_station_api.py',
     'data/1_AOI_GBOV_CONDOM.geojson'
 ]
 missing = [f for f in expected_files if not os.path.exists(os.path.join(PROJECT_DIR, f))]
@@ -152,7 +154,7 @@ Uruchom tę komórkę w dowolnym momencie, gdy wprowadzimy zmiany w plikach `.py
 
 # Wymuszenie przeładowania modułów w pamięci jądra
 import importlib
-for mod_name in ['step_01_ingest', 'step_02_align_and_scale', 'step_03_super_resolve', 'step_04_metrics_alert', 'step_05_colab_run']:
+for mod_name in ['step_01_ingest', 'step_02_align_and_scale', 'step_03_super_resolve', 'step_04_metrics_alert', 'step_05_colab_run', 'step_06_station_api']:
     if mod_name in sys.modules:
         importlib.reload(sys.modules[mod_name])
 print('[OK] Moduły potoku zsynchronizowane i przeładowane!')
@@ -176,12 +178,12 @@ else:
     # 4. Instalacja Zależności
     add_md("## Krok 3: Instalacja Bibliotek Teledetekcyjnych i Uczenia Maszynowego")
 
-    add_code("""# Instalacja pakietów geoprzestrzennych, silnika GEE i przetwarzania rastrów
-!pip install -q earthengine-api geemap geedim rasterio geopandas scikit-image scikit-learn scipy affine shapely
+    add_code("""# Instalacja pakietów geoprzestrzennych, silnika GEE, pętli ISMN i walidacji QA4SM (pytesmo)
+!pip install -q earthengine-api geemap geedim rasterio geopandas scikit-image scikit-learn scipy affine shapely ismn pytesmo xarray
 # Zaawansowane biblioteki super-rozdzielczości i korejestracji (opcjonalne/fallback)
 !pip install -q mlstac sen2sr arosics pydms || true
 
-print('[OK] Pakiety teledetekcyjne zostały pomyślnie zweryfikowane i zainstalowane!')
+print('[OK] Pakiety teledetekcyjne i walidacyjne zostały pomyślnie zweryfikowane i zainstalowane!')
 """)
 
     # 5. Inicjalizacja GEE
@@ -269,6 +271,8 @@ CONFIG = {
     'GEOJSON_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM_ZASIEG.geojson'),
     'PARCELS_PATH': os.path.join(PROJECT_DIR, 'data', '1_AOI_GBOV_CONDOM.geojson'),
     'OUTPUT_DIR': os.path.join(PROJECT_DIR, 'data', '05_Final_Outputs'),
+    'STATION_PROVIDER': 'ismn',  # Domyślny dostawca stacyjny: oficjalny portal ISMN TU Wien
+    'ISMN_DIR': os.path.join(PROJECT_DIR, 'data', '7_isismn_data'),
     'DOWNLOAD_HISTORICAL': True  # Budowa wieloletniej bazy danych 2016-dzis (S2, LST 1km, CGLS SWI, CLMS HR-VPP)
 }
 
@@ -530,6 +534,60 @@ report_path = os.path.join(CONFIG['OUTPUT_DIR'], 'validation_report.md')
 if os.path.exists(report_path):
     with open(report_path, 'r', encoding='utf-8') as f:
         print(f.read())
+""")
+
+    # 12. Moduł 6: Walidacja In-Situ ISMN i Protokół QA4SM
+    add_md("""## MODUŁ 6: Walidacja In-Situ ISMN & Protokół ESA QA4SM (`step_06_station_api.py`)
+Oficjalna walidacja naziemna w oparciu o sieć SMOSMANIA (stacja Condom, sensory ThetaProbe ML2x/ML3 na głębokościach 0.05 m, 0.10 m, 0.20 m, 0.30 m) zintegrowana z oficjalnym pakietem TU Wien `ismn` (filtracja flag jakości 'G') oraz znormalizowanym protokołem ESA QA4SM / FRM4SM (biblioteka `pytesmo`):
+1. **Pobieranie z ISMN Portal API (Domyślne):** Bezpośrednia integracja z `https://ismn.earth` przez klasę `ISMNDownloader` oraz natychmiastowy odczyt zbuforowanych serii in-situ przez `ISMN_Interface`.
+2. **Kolokacja Czasowo-Przestrzenna z Poligonem Stacji:** Ekstrakcja statystyk strefowych z rastrów GeoTIFF dla dokładnej geometrii kwatery `Typ='stacja'` z pliku `1_AOI_GBOV_CONDOM.geojson`.
+3. **Skalowanie Min-Max / Z-score:** Usunięcie błędu systematycznego (bias) pomiędzy wskaźnikiem suszy TVDI a objętościową wilgotnością gruntu ($m^3/m^3$).
+4. **Metryki Dokładności ESA FRM4SM:** Wyznaczenie Pearson $r$, Spearman $\\rho$, RMSE, **ubRMSE** (błąd losowy, cel: $\\le 0.040\\text{ m}^3/\\text{m}^3$), MAE oraz Bias.
+5. **Analiza Największych Odchyleń (Outliers):** Identyfikacja dni o największym błędzie wraz z fizyczną diagnozą przyczyn (opady przelotne, przeschnięcie skorupy glebowej).
+6. **4-panelowy Wykres Diagnostyczny:** Prezentacja przebiegu w czasie, wykresu rozrzutu 1:1, słupków błędu $Sat - Ref$ oraz rozkładu reszt.
+7. **Eksport NetCDF CF-1.6:** Zapis zsynchronizowanych serii gotowych do bezpośredniego wgrania na platformę [https://qa4sm.eu/](https://qa4sm.eu/).""")
+
+    add_code("""# Bezpośredni import z modułu na Dysku Google
+from step_06_station_api import (
+    run_station_validation_pipeline,
+    fetch_station_data,
+    plot_qa4sm_validation
+)
+from IPython.display import display, Image, Markdown
+import os
+
+# Uruchomienie znormalizowanego potoku walidacji ISMN / QA4SM dla poligonu stacji
+station_results = run_station_validation_pipeline(CONFIG)
+
+print('[OK] Zakończono walidację in-situ ISMN / QA4SM:')
+print(f' - Status: {station_results.get("status")}')
+print(f' - Stacja referencyjna: {station_results.get("station")} (Głębokość: 0.05 m, Flaga: G)')
+print(f' - Maska przestrzenna: Poligon kwatery stacji z {CONFIG.get("PARCELS_PATH")}')
+print(f' - Liczba dopasowanych par obserwacji (N): {station_results.get("n_matched")}')
+
+# Wyświetlenie metryk ESA FRM4SM
+metrics = station_results.get('metrics_tvdi', {})
+print('\\n[WYNIKI METRYK ESA QA4SM / FRM4SM]:')
+for k, v in metrics.items():
+    print(f'  * {k.upper()}: {v}')
+
+# Wyświetlenie największych odchyleń
+top_outliers = station_results.get('top_outliers')
+if top_outliers is not None and not top_outliers.empty:
+    print('\\n[NAJWIĘKSZE ODCHYLENIA (TOP DNI)]:')
+    cols_show = [c for c in ['sat_time', 'soil_moisture_m3m3', 'scaled_sat', 'error', 'abs_error'] if c in top_outliers.columns]
+    display(top_outliers[cols_show].head(10))
+
+# Prezentacja 4-panelowego wykresu diagnostycznego QA4SM
+plot_path = station_results.get('plot_path')
+if plot_path and os.path.exists(plot_path):
+    display(Image(filename=plot_path))
+
+# Prezentacja oficjalnego raportu walidacyjnego Markdown
+report_path = station_results.get('report_path')
+if report_path and os.path.exists(report_path):
+    with open(report_path, 'r', encoding='utf-8') as f:
+        display(Markdown(f.read()))
 """)
 
     # 12. Interaktywna Prezentacja Geoprzestrzenna w Geemap

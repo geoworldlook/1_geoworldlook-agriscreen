@@ -48,3 +48,5 @@ credentials.json
 .idea/
 Thumbs.db
 .DS_Store
+scratch/
+data/7_isismn_data/python_metadata/
