@@ -705,8 +705,14 @@ else:
 os.chdir(PROJECT_DIR)
 if PROJECT_DIR not in sys.path:
     sys.path.insert(0, PROJECT_DIR)
-%load_ext autoreload
-%autoreload 2
+# autoreload (przeładowanie kodu po git pull bez restartu); Python 3.12+ nie ma modułu 'imp'
+import importlib
+sys.modules.setdefault('imp', importlib)
+try:
+    %load_ext autoreload
+    %autoreload 2
+except Exception as e:
+    print(f'[INFO] autoreload pominięty ({e}) — po git pull zrestartuj sesję.')
 print('Projekt:', PROJECT_DIR)
 """)
 
