@@ -664,7 +664,7 @@ def create_monitor_notebook():
     add_md("""# AgriWatch Monitor — ciągły monitoring wilgotności gleby (Condom, Gers)
 **Jak używać:** raz w tygodniu `Środowisko wykonawcze → Uruchom wszystko`. Nie trzeba niczego zmieniać w komórkach.
 
-- Kod: GitHub → folder projektu na Dysku Google (`git pull` w komórce 1).
+- Kod: GitHub → czysty klon na Dysku `MyDrive/GeoWorldLook/agriwatch` (`git pull` w komórce 1). Otwieraj ten notatnik z GitHub, nie z Dysku.
 - Obliczenia: ten notatnik w Colab (wystarczy CPU).
 - Wyniki: tabele `data/registry/gwl_*.csv` na Dysku (schemat gotowy do eksportu do bazy danych) oraz raporty w `data/08_Station_Validation/`.
 - Każde zadanie jest zapisane w `gwl_runs` (czas, commit, liczba nowych wierszy, błąd). Błąd jednego zadania nie zatrzymuje kolejnych.
@@ -682,22 +682,16 @@ except Exception:
     IN_COLAB = False
 
 REPO_URL = 'https://github.com/geoworldlook/1_geoworldlook-agriscreen.git'
-CANDIDATE_PATHS = [
-    '/content/drive/MyDrive/1_geoworldlook-agriscreen',
-    '/content/drive/MyDrive/2_geoworldlook',
-    '/content/drive/MyDrive/GEOWORLDLOOK_AgriScreen',
-]
+# Jedyny folder projektu na Dysku: czysty klon repozytorium. Notatnik otwieraj z GitHub (Plik -> Otwórz -> GitHub),
+# żeby Colab nie zapisywał zmian w tym folderze (inaczej git pull odmówi aktualizacji).
+PROJECT_DIR = '/content/drive/MyDrive/GeoWorldLook/agriwatch'
 if IN_COLAB:
-    # Istniejąca kopia projektu na Dysku (także starsza, bez step_07) -> git pull; brak kopii -> git clone
-    PROJECT_DIR = next((p for p in CANDIDATE_PATHS
-                        if os.path.exists(os.path.join(p, '.git')) or os.path.exists(os.path.join(p, 'step_01_ingest.py'))),
-                       None)
-    if PROJECT_DIR is None:
-        PROJECT_DIR = CANDIDATE_PATHS[0]
+    if not os.path.exists(os.path.join(PROJECT_DIR, '.git')):
+        os.makedirs(os.path.dirname(PROJECT_DIR), exist_ok=True)
         !git clone {REPO_URL} "{PROJECT_DIR}"
     !git -C "{PROJECT_DIR}" pull --ff-only
     if not os.path.exists(os.path.join(PROJECT_DIR, 'step_07_station_pipeline.py')):
-        raise RuntimeError('Po git pull nadal brak step_07 — sprawdź komunikat git powyżej (np. lokalne zmiany: git stash).')
+        raise RuntimeError('Brak step_07 po git pull — sprawdź komunikat git powyżej.')
 else:
     # Lokalnie: notatnik leży w notebooks/, projekt piętro wyżej
     PROJECT_DIR = os.path.abspath('..') if os.path.basename(os.getcwd()) == 'notebooks' else os.path.abspath('.')
