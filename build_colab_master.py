@@ -688,11 +688,16 @@ CANDIDATE_PATHS = [
     '/content/drive/MyDrive/GEOWORLDLOOK_AgriScreen',
 ]
 if IN_COLAB:
-    PROJECT_DIR = next((p for p in CANDIDATE_PATHS if os.path.exists(os.path.join(p, 'step_07_station_pipeline.py'))),
-                       CANDIDATE_PATHS[0])
-    if not os.path.exists(os.path.join(PROJECT_DIR, 'step_07_station_pipeline.py')):
+    # Istniejąca kopia projektu na Dysku (także starsza, bez step_07) -> git pull; brak kopii -> git clone
+    PROJECT_DIR = next((p for p in CANDIDATE_PATHS
+                        if os.path.exists(os.path.join(p, '.git')) or os.path.exists(os.path.join(p, 'step_01_ingest.py'))),
+                       None)
+    if PROJECT_DIR is None:
+        PROJECT_DIR = CANDIDATE_PATHS[0]
         !git clone {REPO_URL} "{PROJECT_DIR}"
     !git -C "{PROJECT_DIR}" pull --ff-only
+    if not os.path.exists(os.path.join(PROJECT_DIR, 'step_07_station_pipeline.py')):
+        raise RuntimeError('Po git pull nadal brak step_07 — sprawdź komunikat git powyżej (np. lokalne zmiany: git stash).')
 else:
     # Lokalnie: notatnik leży w notebooks/, projekt piętro wyżej
     PROJECT_DIR = os.path.abspath('..') if os.path.basename(os.getcwd()) == 'notebooks' else os.path.abspath('.')
