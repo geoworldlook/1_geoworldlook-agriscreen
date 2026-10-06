@@ -590,6 +590,26 @@ if report_path and os.path.exists(report_path):
         display(Markdown(f.read()))
 """)
 
+    # 12b. Moduł 7: Pipeline stacyjny (jedna stacja, niezależny od kroków 1-5)
+    add_md("""## MODUŁ 7: Pipeline stacyjny Condom — wilgotność z Sentinel-1 vs czujnik ISMN (`step_07_station_pipeline.py`)
+Samodzielny potok dla jednej stacji (niezależny od modułów 1-5, wymaga tylko GEE z Kroku 4):
+1. Dane in situ ISMN (5 cm) z kontrolą jakości ponad flagi ISMN (`docs/evidence/Condom_QC.md`).
+2. Serie czasowe Sentinel-1, Sentinel-2 (NDVI) i ERA5-Land w buforze 50 m wokół stacji — pobierane z GEE i zapisywane w cache na Dysku (kolejne uruchomienia pobierają tylko brakujące okresy).
+3. Wilgotność z Sentinel-1 metodą change detection (per orbita, kalibracja 2016-2021, bez użycia danych stacji).
+4. Walidacja: R, ubRMSD, R anomalii 35-dniowych z 95% CI; benchmark ERA5-Land na tych samych parach; osobno dla każdego czujnika.
+5. Wyniki w `data/08_Station_Validation/Condom/`: `station_report.md`, `station_results.png`, CSV z metrykami i parami.""")
+
+    add_code("""from step_07_station_pipeline import run_station_pipeline
+from IPython.display import display, Image, Markdown
+
+# CONFIG notatnika jest bezpieczny do przekazania: moduł używa tylko swoich kluczy (PROJECT_DIR, ISMN_DIR, GEE_PROJECT)
+station = run_station_pipeline(CONFIG)
+
+display(Image(filename=station['plot_path']))
+with open(station['report_path'], 'r', encoding='utf-8') as f:
+    display(Markdown(f.read()))
+""")
+
     # 12. Interaktywna Prezentacja Geoprzestrzenna w Geemap
     add_md("""## Krok 6: Interaktywna Wizualizacja Geoprzestrzenna Wyników w Colab
 Prezentacja zaostrzonych warstw LST, TCARI/OSAVI, TVDI oraz macierzy alertów na interaktywnym podkładzie satelitarnym z nałożeniem wektorowych granic działek.""")
@@ -618,5 +638,106 @@ m_results
             json.dump(nb, out, indent=2, ensure_ascii=False)
         print(f'Pomyślnie wygenerowano notatnik: {p}')
 
+def create_monitor_notebook():
+    """
+    Notatnik sterujący monitoringiem (plan v3, B.7): kilka komórek, każde zadanie przez run_task,
+    wyniki w rejestrze gwl_* na Dysku Google. Uruchamiany co tydzień: "Uruchom wszystko".
+    """
+    nb = {
+        'cells': [],
+        'metadata': {
+            'colab': {'name': 'AgriWatch_Monitor.ipynb', 'provenance': []},
+            'language_info': {'name': 'python', 'version': '3.10.12'}
+        },
+        'nbformat': 4,
+        'nbformat_minor': 0
+    }
+
+    def add_md(text):
+        nb['cells'].append({'cell_type': 'markdown', 'metadata': {},
+                            'source': [line + '\n' for line in text.strip().split('\n')]})
+
+    def add_code(code):
+        nb['cells'].append({'cell_type': 'code', 'execution_count': None, 'metadata': {}, 'outputs': [],
+                            'source': [line + '\n' for line in code.strip().split('\n')]})
+
+    add_md("""# AgriWatch Monitor — ciągły monitoring wilgotności gleby (Condom, Gers)
+**Jak używać:** raz w tygodniu `Środowisko wykonawcze → Uruchom wszystko`. Nie trzeba niczego zmieniać w komórkach.
+
+- Kod: GitHub → folder projektu na Dysku Google (`git pull` w komórce 1).
+- Obliczenia: ten notatnik w Colab (wystarczy CPU).
+- Wyniki: tabele `data/registry/gwl_*.csv` na Dysku (schemat gotowy do eksportu do bazy danych) oraz raporty w `data/08_Station_Validation/`.
+- Każde zadanie jest zapisane w `gwl_runs` (czas, commit, liczba nowych wierszy, błąd). Błąd jednego zadania nie zatrzymuje kolejnych.
+
+Plan: `docs/plans/Plan_v3_monitoring_winnic_SR.md`. Etap E0: stacja Condom.""")
+
+    add_md("## 1. Dysk Google, kod z GitHub")
+    add_code("""import os, sys
+
+try:
+    from google.colab import drive
+    drive.mount('/content/drive')
+    IN_COLAB = True
+except Exception:
+    IN_COLAB = False
+
+REPO_URL = 'https://github.com/geoworldlook/1_geoworldlook-agriscreen.git'
+CANDIDATE_PATHS = [
+    '/content/drive/MyDrive/1_geoworldlook-agriscreen',
+    '/content/drive/MyDrive/2_geoworldlook',
+    '/content/drive/MyDrive/GEOWORLDLOOK_AgriScreen',
+]
+if IN_COLAB:
+    PROJECT_DIR = next((p for p in CANDIDATE_PATHS if os.path.exists(os.path.join(p, 'step_07_station_pipeline.py'))),
+                       CANDIDATE_PATHS[0])
+    if not os.path.exists(os.path.join(PROJECT_DIR, 'step_07_station_pipeline.py')):
+        !git clone {REPO_URL} "{PROJECT_DIR}"
+    !git -C "{PROJECT_DIR}" pull --ff-only
+else:
+    # Lokalnie: notatnik leży w notebooks/, projekt piętro wyżej
+    PROJECT_DIR = os.path.abspath('..') if os.path.basename(os.getcwd()) == 'notebooks' else os.path.abspath('.')
+
+os.chdir(PROJECT_DIR)
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+%load_ext autoreload
+%autoreload 2
+print('Projekt:', PROJECT_DIR)
+""")
+
+    add_md("## 2. Środowisko: pakiety, Google Earth Engine, rejestr")
+    add_code("""from step_05_colab_run import setup_runtime, run_task, run_history, registry_summary, registry_read
+
+rt = setup_runtime(PROJECT_DIR, gee_project='ee-geoworldlook', pull=False)
+""")
+
+    add_md("""## 3. Stacja Condom — wilgotność z Sentinel-1 w miejscu czujnika i błąd względem pomiaru 5 cm
+Dane S-1, S-2 i ERA5-Land są pobierane z GEE z cache na Dysku (kolejne uruchomienia pobierają tylko brakujące okresy).
+Wynik: raport, wykres, metryki z 95% CI oraz wiersze w `gwl_observations`, `gwl_calibrations`, `gwl_validation_metrics`.""")
+    add_code("""from step_07_station_pipeline import run_station_pipeline
+
+station = run_task(rt, 'station_condom', run_station_pipeline, rt)
+""")
+
+    add_md("## 4. Panel: wyniki, rejestr, historia uruchomień")
+    add_code("""from IPython.display import display, Image, Markdown
+
+if station:
+    display(Image(filename=station['plot_path']))
+    with open(station['report_path'], 'r', encoding='utf-8') as f:
+        display(Markdown(f.read()))
+
+display(registry_summary(rt))
+display(run_history(rt, n=10))
+""")
+
+    path = 'notebooks/AgriWatch_Monitor.ipynb'
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as out:
+        json.dump(nb, out, indent=2, ensure_ascii=False)
+    print(f'Pomyślnie wygenerowano notatnik: {path}')
+
+
 if __name__ == '__main__':
     create_master_notebook()
+    create_monitor_notebook()
