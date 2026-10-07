@@ -3,7 +3,7 @@
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/geoworldlook/1_geoworldlook-agriscreen/blob/main/notebooks/AgriWatch_Monitor.ipynb)
 
 Monitoring anomalii suszy dla jednej winnicy (`VINEYARD_06`, 2,9 ha, 136 m od stacji ISMN SMOSMANIA Condom)
-z otwartych danych: Sentinel-2, ERA5-Land i opcjonalnie super-resolution SEN2SR 2,5 m.
+z otwartych danych: ERA5-Land i Sentinel-2 po super-resolution SEN2SR do 2,5 m (rozdzielczość detekcji).
 Status dekadowy wzorowany na Combined Drought Indicator (CDI) Europejskiego Obserwatorium Suszy (EDO):
 
 | Status | Warunek | Akcja |
@@ -56,4 +56,5 @@ python step_07_station_pipeline.py --selftest
 ## Zależności
 
 `earthengine-api geemap geedim rasterio geopandas numpy pandas scipy matplotlib pytesmo ismn`;
-dla super-resolution dodatkowo `sen2sr mlstac torch` (opcjonalne — bez nich monitoring działa na 10 m).
+dla super-resolution dodatkowo `sen2sr mlstac torch` (wymagane do detekcji; środowisko Colab z GPU —
+na CPU około 1 min na scenę). Bez SR status liczy się bez warstwy roślinności.

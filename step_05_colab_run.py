@@ -361,7 +361,9 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "SPI_DAYS": (30, 90),                 # SPI-1 i SPI-3
     # Roślinność
     "VEG_INDEX": "ndvi",
-    "VEG_PRODUCT": "S2_10m",              # produkt do statusu; SR wchodzi tylko, jeśli walidacja pokaże przewagę
+    "VEG_PRODUCT": "S2SR_2.5m",           # rozdzielczość detekcji: NDVI z SEN2SR 2,5 m (decyzja 2026-10-07);
+                                          # sceny, które nie przeszły kontroli SR, nie wchodzą do detekcji.
+                                          # S2_10m liczony dalej jako odniesienie (walidacja, porównanie paired)
     "VEG_HALF_WINDOW_DAYS": 15,
     "VEG_MIN_REF": 5,
     "VEG_MIN_CLEAR_FRAC": 0.9,
@@ -372,7 +374,7 @@ MONITOR_CONFIG: Dict[str, Any] = {
     # Super-resolution
     "USE_SR": True,
     "SR_MODEL_DIR": "data/models/SEN2SRLite_main",
-    "SR_MAX_SCENES_PER_RUN": 150,
+    "SR_MAX_SCENES_PER_RUN": 150,         # limit na uruchomienie (sesja Colab); None = wszystkie. Od najnowszych
     "SR_MIN_DETAIL_RATIO": 0.02,          # H-SR0: v1 (interpolacja) = 0,005
     "SR_MAX_CONSISTENCY_RMSE": 0.01,      # H-SR1: reflektancja, w natywnej rozdzielczości pasma (10 m / 20 m)
     "SR_DIR": "data/03_SR_2.5m",
@@ -465,11 +467,39 @@ def _stats_to_obs(recs: List[Dict[str, Any]], run_tag: str,
     return pd.DataFrame(rows)
 
 
+def _sr_qc_done(obs: pd.DataFrame) -> set:
+    """Sceny ocenione bieżącą wersją kontroli SR (step_03.SR_QC_VERSION)."""
+    import step_03_super_resolve as s3
+    m = ((obs["product"] == "SR_QC") & (obs["variable"] == "sr_ok")
+         & (obs["calib_id"].astype(str) == f"SEN2SRLite_main_{s3.SR_QC_VERSION}"))
+    return set(obs.loc[m, "time_utc"].astype(str))
+
+
+def sr_coverage(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, int]:
+    """
+    Ile scen sezonu (S2_MONTHS) ma już SR: przetworzone (wiersz SR_QC), przyjęte do detekcji (NDVI S2SR_2.5m),
+    w kolejce. Detekcja korzysta tylko z przyjętych; klimatologia anomalii SR jest pełna dopiero bez kolejki.
+    """
+    import step_04_metrics_alert as s4
+    m0, m1 = cfg["S2_MONTHS"]
+    keys = set()
+    for p in glob.glob(os.path.join(cfg["S2_DIR"], "S2_L2A_*.tif")):
+        t = s4.scene_time(p)
+        if m0 <= t.month <= m1:
+            keys.add(t.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    obs = registry_read(rt, "gwl_observations")
+    done = _sr_qc_done(obs)
+    ok = set(obs.loc[(obs["product"] == "S2SR_2.5m") & (obs["variable"] == "ndvi"), "time_utc"].astype(str))
+    return {"scenes": len(keys), "sr_done": len(keys & done), "sr_ok": len(keys & ok),
+            "remaining": len(keys - done)}
+
+
 def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[bool] = None) -> Dict[str, Any]:
     """
     Dla każdej nowej sceny: indeksy obiektów z 10 m; jeśli SR włączony — SEN2SR 2,5 m, kontrola H-SR0/H-SR1,
-    indeksy obiektów z 2,5 m tylko dla scen, które przeszły kontrolę. Postęp zapisywany co 25 scen,
-    więc przerwana sesja Colab wznawia się od miejsca przerwania.
+    indeksy obiektów z 2,5 m tylko dla scen, które przeszły kontrolę. Sceny idą od najnowszej, więc przy limicie
+    SR_MAX_SCENES_PER_RUN bieżący status dostaje SR od razu, a historia (klimatologia) uzupełnia się w kolejnych
+    uruchomieniach. Postęp zapisywany co 25 scen, więc przerwana sesja Colab wznawia się od miejsca przerwania.
     """
     import step_01_ingest as s1
     import step_03_super_resolve as s3
@@ -480,7 +510,11 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
     scenes = sorted(glob.glob(os.path.join(cfg["S2_DIR"], "S2_L2A_*.tif")))
     obs = registry_read(rt, "gwl_observations")
     done = {p: set(obs.loc[obs["product"] == p, "time_utc"].astype(str)) for p in ("S2_10m", "S2SR_2.5m")}
-    state = {"sites": None, "model": None, "dev": None, "sr_error": None}
+    done["S2SR_2.5m"] |= _sr_qc_done(obs)      # odrzucone bieżącą wersją kontroli też są „zrobione”
+    qc_calib = f"SEN2SRLite_main_{s3.SR_QC_VERSION}"
+    state = {"sites": None, "model": None, "dev": None, "sr_error": None, "sr_seconds": 0.0}
+    sr_cap = cfg["SR_MAX_SCENES_PER_RUN"] if cfg["SR_MAX_SCENES_PER_RUN"] is not None else len(scenes)
+    newest = scenes[-1] if scenes else None
     buf: List[Dict[str, Any]] = []
     buf_sr: Dict[tuple, List[Dict[str, Any]]] = {}     # zmienne SR przyjęte przez kontrolę -> rekordy
     qc: List[Dict[str, Any]] = []
@@ -499,12 +533,12 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
             registry_upsert(rt, "gwl_observations", pd.DataFrame(qc))
             qc.clear()
 
-    for k, path in enumerate(scenes):
+    for path in reversed(scenes):
         t = s4.scene_time(path)
         tkey = t.strftime("%Y-%m-%dT%H:%M:%SZ")
         need10 = tkey not in done["S2_10m"]
         needsr = (use_sr and state["sr_error"] is None and tkey not in done["S2SR_2.5m"]
-                  and nsr < cfg["SR_MAX_SCENES_PER_RUN"])
+                  and nsr < sr_cap)
         if not (need10 or needsr):
             continue
         data, prof = s1.read_geotiff_to_numpy(path)
@@ -523,14 +557,16 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
                     state["sr_error"] = f"{type(e).__name__}: {e}"
                     logger.error(f"SEN2SR niedostępny — SR pominięty (bez zastępstwa interpolacją): {state['sr_error']}")
             if state["model"] is not None:
+                t_sr = time.time()
                 arr25 = s3.super_resolve(arr, state["model"], state["dev"])
+                state["sr_seconds"] += time.time() - t_sr
                 chk = s3.sr_checks(arr, arr25, cfg)
                 nsr += 1
                 for var in ("detail_ratio_min", "consistency_rmse_max", "sr_ok",
                             "detail_ratio_min_20m", "consistency_rmse_max_20m", "sr_ok_20m"):
                     qc.append({"site_id": "AOI", "product": "SR_QC", "variable": var, "time_utc": tkey, "orbit": 0,
                                "value": float(chk[var]), "unit": "1", "n_pixels": np.nan, "qc_flags": "",
-                               "calib_id": "SEN2SRLite_main", "run_id": tag, "ingested_at": _utc_now()})
+                               "calib_id": qc_calib, "run_id": tag, "ingested_at": _utc_now()})
                 if chk["sr_ok"]:
                     # NDVI z SR tylko po kontroli grupy 10 m; NDMI i NDRE (pasma 20 m) tylko po kontroli grupy 20 m
                     nsr_ok += 1
@@ -539,7 +575,7 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
                     p25 = s3.profile_25m(prof)
                     c25 = np.repeat(np.repeat(cloud, 4, 0), 4, 1)
                     buf_sr.setdefault(variables, []).extend(s4.site_stats(arr25, c25, p25, sites, "S2SR_2.5m", t))
-                    if t.strftime("%Y-%m") in showcase or k == len(scenes) - 1:
+                    if t.strftime("%Y-%m") in showcase or path == newest:
                         stem = os.path.join(cfg["SR_DIR"], f"{t:%Y%m%d}")
                         s1.write_geotiff(s4.compute_indices(arr25)["ndvi"], p25, stem + "_NDVI_2.5m.tif")
                         s1.write_geotiff(s4.compute_indices(arr)["ndvi"], prof, stem + "_NDVI_10m.tif")
@@ -557,6 +593,12 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
     flush()
     msg = (f"10 m: {n10} nowych scen; SR: {nsr} scen, {nsr_ok} przeszło kontrolę pasm 10 m (NDVI), "
            f"{nsr_ok20} pasm 20 m (NDMI, NDRE)")
+    if nsr:
+        msg += f"; SR {state['sr_seconds'] / nsr:.1f} s/scenę na {state['dev']}"
+    cov = sr_coverage(rt, cfg)
+    if cov["scenes"]:
+        msg += (f"; pokrycie SR (detekcja): {cov['sr_done']}/{cov['scenes']} scen przetworzonych, "
+                f"{cov['sr_ok']} przyjętych, {cov['remaining']} w kolejce")
     if state["sr_error"]:
         msg += f"; SR niedostępny: {state['sr_error'][:200]}"
     reg = {"gwl_sites": _sites_rows(state["sites"], cfg)} if state["sites"] is not None else {}
@@ -626,7 +668,15 @@ def task_anomalies(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
                      "clim_mean": r.clim_mean, "z": r.z, "clim_id": veg_clim})
     anomalies = pd.DataFrame(rows).drop_duplicates(["site_id", "product", "date"], keep="last")
     cur = status[status["site_id"] == cfg["MAIN_SITE"]].iloc[-1]
-    return {"message": f"{cfg['MAIN_SITE']} {cur['date']}: {cur['cdi_class']} ({cur['reason_codes']})",
+    msg = f"{cfg['MAIN_SITE']} {cur['date']}: {cur['cdi_class']} ({cur['reason_codes']})"
+    if cfg["VEG_PRODUCT"] == "S2SR_2.5m":
+        cov = sr_coverage(rt, cfg)
+        if cov["remaining"]:
+            msg += (f"; UWAGA: SR niepełny ({cov['remaining']} z {cov['scenes']} scen w kolejce) — klimatologia "
+                    f"anomalii 2,5 m jest krótsza, dopóki task_scene_stats nie przetworzy wszystkich scen")
+        if veg_status.empty:
+            msg += "; brak anomalii NDVI 2,5 m — status bez warstwy roślinności (alert niemożliwy)"
+    return {"message": msg,
             "registry": {"gwl_anomalies": anomalies, "gwl_status": status}}
 
 
@@ -656,7 +706,8 @@ def task_bulletin(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     s = sites[sites["site_id"] == cfg["MAIN_SITE"]]
     site = s.iloc[0].to_dict() if len(s) else {"site_id": cfg["MAIN_SITE"], "name": cfg["MAIN_SITE"]}
     veg_main = veg[veg["index"] == cfg["VEG_INDEX"]] if len(veg) else veg
-    paths = s4.build_bulletin(status, veg_main, val, site, cfg, cfg["OUTPUT_DIR"])
+    paths = s4.build_bulletin(status, veg_main, val, site, dict(cfg, SR_COVERAGE=sr_coverage(rt, cfg)),
+                              cfg["OUTPUT_DIR"])
     return {"message": ", ".join(os.path.relpath(p, cfg["PROJECT_DIR"]) for p in paths.values())}
 
 
@@ -688,7 +739,8 @@ def _selftest(out_dir: str) -> None:
     rt = {"PROJECT_DIR": project, "REGISTRY_DIR": os.path.join(out_dir, "registry"), "GIT_COMMIT": "selftest"}
     cfg = monitor_config(rt, {"S2_DIR": os.path.join(out_dir, "s2"), "ERA5_DIR": os.path.join(out_dir, "era5"),
                               "OUTPUT_DIR": os.path.join(out_dir, "out"), "SR_DIR": os.path.join(out_dir, "sr"),
-                              "BOOTSTRAP_N": 200, "USE_SR": False})
+                              "BOOTSTRAP_N": 200, "USE_SR": True, "SR_MAX_SCENES_PER_RUN": None,
+                              "SR_MODEL_DIR": os.path.join(out_dir, "model")})
     rng = np.random.default_rng(1)
 
     # Syntetyczne ERA5-Land 1991-2024: cykl roczny + szum AR(1); opad gamma
@@ -752,11 +804,36 @@ def _selftest(out_dir: str) -> None:
     assert chk20["sr_ok"] and chk20["sr_ok_20m"], chk20
     print("[OK] Kontrola SR: interpolacja odrzucona, spójny SR przyjęty (pasma 10 m i 20 m w natywnej rozdzielczości).")
 
-    for name, fn in (("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
-                     ("validate", task_validate), ("bulletin", task_bulletin)):
-        run_task(rt, name, fn, rt, cfg, raise_errors=True)
-    res = run_task(rt, "scene_stats_repeat", task_scene_stats, rt, cfg, raise_errors=True)
-    assert res["skipped"], "Drugie uruchomienie nie powinno przetwarzać scen ponownie"
+    # Atrapa SEN2SR (bez GPU i pobierania modelu): powielenie pikseli 4x4 + szczegół o zerowej średniej w bloku,
+    # więc kontrola H-SR0/H-SR1 przechodzi, a NDVI 2,5 m = NDVI 10 m + szum. Jedna scena celowo zepsuta (odrzucona).
+    real_load, real_sr = s3.load_sen2sr, s3.super_resolve
+    bad = {"n": 0}
+
+    def fake_super_resolve(arr10, model, device, overlap=32):
+        up = np.repeat(np.repeat(arr10, 4, 1), 4, 2)
+        d = rng.normal(0, 0.01, up.shape)
+        out = up + d - np.repeat(np.repeat(s3.block_mean(d), 4, 1), 4, 2)
+        bad["n"] += 1
+        if bad["n"] == 2:
+            out[:4] += 0.05                       # zła radiometria pasm 10 m -> scena poza detekcją
+        return out.astype("float32")
+
+    s3.load_sen2sr = lambda model_dir, device=None: ("fake", "cpu")
+    s3.super_resolve = fake_super_resolve
+    try:
+        for name, fn in (("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
+                         ("validate", task_validate), ("bulletin", task_bulletin)):
+            run_task(rt, name, fn, rt, cfg, raise_errors=True)
+        res = run_task(rt, "scene_stats_repeat", task_scene_stats, rt, cfg, raise_errors=True)
+    finally:
+        s3.load_sen2sr, s3.super_resolve = real_load, real_sr
+    assert res["skipped"], "Drugie uruchomienie nie powinno przetwarzać scen ponownie (także odrzuconych przez SR)"
+    cov = sr_coverage(rt, cfg)
+    assert cov["remaining"] == 0 and cov["sr_ok"] == cov["scenes"] - 1, cov
+    st_main = registry_read(rt, "gwl_status")
+    st_main = st_main[st_main["site_id"] == "VINEYARD_06"]
+    assert set(st_main["veg_source"].dropna()) == {"S2SR_2.5m"}, "Detekcja ma używać wyłącznie NDVI 2,5 m"
+    print(f"[OK] Detekcja na SR 2,5 m: {cov['sr_ok']}/{cov['scenes']} scen przyjętych, 1 odrzucona.")
 
     st = registry_read(rt, "gwl_status")
     assert "VINEYARD_06" in set(st["site_id"]) and st["cdi_class"].notna().all()

@@ -39,7 +39,7 @@ Zależności między modułami: `step_05` importuje `step_01/03/04/07` leniwie (
 |---|---|---|
 | `task_ingest_s2` | AOI + bufor 320 m, sezon IV–X, ≤ 40% chmur nad AOI | `data/01_Raw_Sentinel2/S2_L2A_*.tif` |
 | `task_ingest_era5` | centroid winnicy, 1991 → dziś | `data/02_ERA5_Land/era5_land_daily.csv` |
-| `task_scene_stats` | nowe sceny (brak w `gwl_observations`) | statystyki obiektów 10 m i 2,5 m (tylko indeksy, których pasma przeszły H-SR0/H-SR1); QC SR jako `product = SR_QC`; zapis co 25 scen (wznawianie po przerwanej sesji) |
+| `task_scene_stats` | nowe sceny (brak w `gwl_observations`), od najnowszej | statystyki obiektów 10 m i 2,5 m (tylko indeksy, których pasma przeszły H-SR0/H-SR1); QC SR jako `product = SR_QC` z wersją kontroli w `calib_id`; limit `SR_MAX_SCENES_PER_RUN` na uruchomienie; pokrycie SR w komunikacie (`sr_coverage`); zapis co 25 scen (wznawianie po przerwanej sesji) |
 | `task_anomalies` | ERA5, obserwacje roślinności | `gwl_anomalies`, `gwl_status`, CSV w `OUTPUT_DIR` |
 | `task_validate` | anomalie i status | `gwl_validation_metrics` (R anomalii vs ISMN 5/20/30 cm, POD/FAR) |
 | `task_bulletin` | status, anomalie, walidacja | `bulletin.md`, wykresy PNG, `agriwatch_latest.json` |
@@ -53,8 +53,10 @@ Zależności między modułami: `step_05` importuje `step_01/03/04/07` leniwie (
   min. 5 scen odniesienia, tylko sceny z ≥ 90% czystych pikseli.
 - **Status** (`build_status`): na koniec każdej dekady; roślinność tylko w IV–X i nie starsza niż 30 dni;
   `confidence` = high / medium / low zależnie od dostępności i wieku sceny.
-- **Produkt roślinności do statusu:** `S2_10m`. SR 2,5 m jest liczony równolegle; do statusu wejdzie,
-  jeśli walidacja pokaże przewagę (`VEG_PRODUCT` w `MONITOR_CONFIG`).
+- **Rozdzielczość detekcji: SR 2,5 m** (`VEG_PRODUCT = "S2SR_2.5m"`, decyzja 2026-10-07). Każda scena wchodząca do
+  detekcji jest po SEN2SR; scena, która nie przeszła kontroli pasm 10 m, nie wchodzi do detekcji (bez zastępstwa 10 m).
+  NDVI 10 m jest liczony dalej jako odniesienie: walidacja `anomaly_clim_paired` porównuje oba produkty na tych samych dniach.
+  Klimatologia anomalii 2,5 m jest pełna dopiero po przetworzeniu SR wszystkich scen; do tego czasu biuletyn podaje pokrycie SR.
 - **Kontrola SR:** H-SR0 — `std(SR − bikubika) / std(SR) ≥ 0,02` (model faktycznie działał);
   H-SR1 — RMSE(SR uśredniony do natywnej rozdzielczości pasma, wejście) ≤ 0,01 (spójność radiometryczna):
   pasma 10 m (B02, B03, B04, B08) w blokach 4×4, pasma 20 m (B05–B07, B8A, B11, B12) w blokach 8×8 względem pikseli 20 m

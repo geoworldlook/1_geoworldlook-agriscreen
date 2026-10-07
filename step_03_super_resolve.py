@@ -41,6 +41,9 @@ SEN2SR_BANDS = ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "
 SEN2SR_MODEL_URL = "https://huggingface.co/tacofoundation/sen2sr/resolve/main/SEN2SRLite/main/mlm.json"
 SR_FACTOR = 4
 MODEL_TILE = 128          # sen2sr.predict_large tnie obraz na kafelki 128x128 px (i wymaga kwadratu)
+# Wersja kontroli H-SR0/H-SR1 zapisywana w rejestrze (calib_id wierszy SR_QC). Zmiana wersji = sceny
+# ocenione starszą kontrolą są przeliczane jeden raz; sceny odrzucone bieżącą wersją nie są powtarzane.
+SR_QC_VERSION = "qc2"     # qc2: kontrola w natywnej rozdzielczości pasma, osobno grupy 10 m i 20 m
 BANDS_10M = ("B02", "B03", "B04", "B08")
 BANDS_20M = ("B05", "B06", "B07", "B8A", "B11", "B12")
 
@@ -67,6 +70,9 @@ def load_sen2sr(model_dir: str, device: Optional[str] = None) -> Tuple[Any, Any]
     model = mlstac.load(model_dir).compiled_model(device=dev)
     model = model.to(dev)
     logger.info(f"SEN2SR: model gotowy ({dev}).")
+    if dev.type == "cpu":
+        logger.warning("SEN2SR działa na CPU (brak GPU): około 1 min na scenę. "
+                       "W Colab: Środowisko wykonawcze -> Zmień typ -> GPU.")
     return model, dev
 
 

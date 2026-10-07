@@ -312,8 +312,9 @@ _COLORS = {"normal": "#dfeee0", "recovery": "#cfe3f5", "watch": "#ffe08a", "warn
 
 
 def plot_season(status: pd.DataFrame, veg: pd.DataFrame, site_id: str, start: str, end: str, title: str,
-                out_png: str) -> str:
-    """Trzy panele (SPI-3, SMA strefy korzeni, anomalia roślinności) + pas statusu."""
+                out_png: str, primary: Optional[str] = None) -> str:
+    """Trzy panele (SPI-3, SMA strefy korzeni, anomalia roślinności) + pas statusu.
+    primary: produkt roślinności używany w detekcji (opisany w legendzie); pozostałe = odniesienie."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -330,7 +331,9 @@ def plot_season(status: pd.DataFrame, veg: pd.DataFrame, site_id: str, start: st
     for prod, mk in (("S2_10m", "o"), ("S2SR_2.5m", "s")):
         p = vv[vv["product"] == prod] if len(vv) else vv
         if len(p):
-            ax[2].scatter(p["time"], p["z"], marker=mk, s=18, label=prod)
+            role = "" if primary is None else (" (detection)" if prod == primary else " (reference)")
+            kw = {} if primary is None or prod == primary else {"alpha": 0.35}
+            ax[2].scatter(p["time"], p["z"], marker=mk, s=18, label=prod + role, **kw)
     ax[2].axhline(-1, c="k", ls="--", lw=0.8); ax[2].set_ylabel("Vegetation\nanomaly NDVI (z)")
     if len(vv):
         ax[2].legend(fontsize=8)
@@ -347,6 +350,21 @@ def plot_season(status: pd.DataFrame, veg: pd.DataFrame, site_id: str, start: st
     return out_png
 
 
+def _veg_method(cfg: Dict[str, Any]) -> str:
+    """Opis warstwy roślinności (biuletyn, JSON): produkt detekcji i pokrycie SR."""
+    if cfg.get("VEG_PRODUCT") == "S2SR_2.5m":
+        txt = ("Sentinel-2 NDVI of the vineyard super-resolved to 2.5 m with SEN2SR (inner pixels), anomaly vs other "
+               "years; only scenes that pass the SR quality checks (H-SR0 detail, H-SR1 radiometric consistency of "
+               "the 10 m bands) enter detection; 10 m NDVI is kept as a reference")
+    else:
+        txt = "Sentinel-2 NDVI of the vineyard at 10 m (inner pixels), anomaly vs other years"
+    cov = cfg.get("SR_COVERAGE")
+    if cov and cov.get("scenes"):
+        txt += (f". SR coverage: {cov['sr_ok']} of {cov['scenes']} season scenes accepted, "
+                f"{cov['remaining']} not yet processed")
+    return txt
+
+
 def build_bulletin(status: pd.DataFrame, veg: pd.DataFrame, validation: pd.DataFrame, site: Dict[str, Any],
                    cfg: Dict[str, Any], out_dir: str) -> Dict[str, str]:
     """Raport Markdown (EN), wykresy PNG i JSON `agriwatch_latest.json` dla geoworldlook.vercel.app."""
@@ -355,12 +373,14 @@ def build_bulletin(status: pd.DataFrame, veg: pd.DataFrame, validation: pd.DataF
     st = status[status["site_id"] == sid].sort_values("date")
     cur = st.iloc[-1].to_dict()
     y = cfg["SHOWCASE_SEASON"]
+    primary = cfg.get("VEG_PRODUCT")
     png_show = plot_season(status, veg, sid, f"{y}-03-01", f"{y}-10-31",
-                           f"AgriWatch — {site['name']} — season {y}", os.path.join(out_dir, f"season_{y}.png"))
+                           f"AgriWatch — {site['name']} — season {y}", os.path.join(out_dir, f"season_{y}.png"),
+                           primary)
     last = pd.to_datetime(st["date"]).max()
     png_now = plot_season(status, veg, sid, (last - pd.Timedelta(days=365)).strftime("%Y-%m-%d"),
                           last.strftime("%Y-%m-%d"), f"AgriWatch — {site['name']} — last 12 months",
-                          os.path.join(out_dir, "last_12_months.png"))
+                          os.path.join(out_dir, "last_12_months.png"), primary)
     val = validation.copy() if validation is not None else pd.DataFrame()
 
     def clean(x):
@@ -376,12 +396,13 @@ def build_bulletin(status: pd.DataFrame, veg: pd.DataFrame, validation: pd.DataF
         "current": {k: clean(v) for k, v in cur.items()},
         "dekads": [{k: clean(v) for k, v in r.items()} for r in st.tail(108).to_dict("records")],
         "showcase_season": y,
+        "sr_coverage": cfg.get("SR_COVERAGE"),
         "validation": [{k: clean(v) for k, v in r.items()} for r in val.to_dict("records")],
         "method": {
             "logic": "Simplified EDO Combined Drought Indicator: watch = SPI-1<=-2 or SPI-3<=-1; "
                      "warning = root-zone soil moisture anomaly <=-1; alert = warning and vineyard NDVI anomaly <=-1",
             "soil_moisture": "ERA5-Land layers 0-100 cm, anomaly vs 1991-2020 day-of-year climatology",
-            "vegetation": "Sentinel-2 NDVI of the vineyard (inner pixels), anomaly vs other years; 10 m and SEN2SR 2.5 m",
+            "vegetation": _veg_method(cfg),
             "validation": "Anomaly correlation and drought-event detection against ISMN SMOSMANIA Condom (5-30 cm)",
         },
     }
