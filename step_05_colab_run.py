@@ -376,7 +376,9 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "SR_MODEL_DIR": "data/models/SEN2SRLite_main",
     "SR_MAX_SCENES_PER_RUN": 150,         # limit na uruchomienie (sesja Colab); None = wszystkie. Od najnowszych
     "SR_MIN_DETAIL_RATIO": 0.02,          # H-SR0: v1 (interpolacja) = 0,005
-    "SR_MAX_CONSISTENCY_RMSE": 0.01,      # H-SR1: reflektancja, w natywnej rozdzielczości pasma (10 m / 20 m)
+    "SR_MAX_CONSISTENCY_RMSE": 0.01,      # H-SR1 pasm 10 m (NDVI, rdzeń detekcji): stały, surowy próg reflektancji
+    "SR_20M_SPEC_FACTOR": 1.0,            # H-SR1 pasm 20 m: RMSE ≤ k·(0,05·ρ + 0,005), specyfikacja L2A (Vermote 2008);
+                                          # ryzyko przyjęte świadomie: błąd NDMI/NDRE z 2,5 m ~0,03–0,04 na piksel
     "SR_DIR": "data/03_SR_2.5m",
     "SHOWCASE_MONTHS": ["2022-07", "2022-08"],
     "SHOWCASE_SEASON": 2022,
@@ -467,12 +469,17 @@ def _stats_to_obs(recs: List[Dict[str, Any]], run_tag: str,
     return pd.DataFrame(rows)
 
 
-def _sr_qc_done(obs: pd.DataFrame) -> set:
-    """Sceny ocenione bieżącą wersją kontroli SR (step_03.SR_QC_VERSION)."""
+def _sr_qc_current(obs: pd.DataFrame, variable: str = "sr_ok") -> pd.DataFrame:
+    """Wiersze SR_QC bieżącej wersji kontroli (step_03.SR_QC_VERSION) dla jednej zmiennej."""
     import step_03_super_resolve as s3
-    m = ((obs["product"] == "SR_QC") & (obs["variable"] == "sr_ok")
+    m = ((obs["product"] == "SR_QC") & (obs["variable"] == variable)
          & (obs["calib_id"].astype(str) == f"SEN2SRLite_main_{s3.SR_QC_VERSION}"))
-    return set(obs.loc[m, "time_utc"].astype(str))
+    return obs.loc[m]
+
+
+def _sr_qc_done(obs: pd.DataFrame) -> set:
+    """Sceny ocenione bieżącą wersją kontroli SR. Starsze wersje (bez NDMI/NDRE z 2,5 m) są przeliczane raz."""
+    return set(_sr_qc_current(obs)["time_utc"].astype(str))
 
 
 def sr_coverage(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, int]:
@@ -488,8 +495,9 @@ def sr_coverage(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, int]:
         if m0 <= t.month <= m1:
             keys.add(t.strftime("%Y-%m-%dT%H:%M:%SZ"))
     obs = registry_read(rt, "gwl_observations")
-    ok = set(obs.loc[(obs["product"] == "S2SR_2.5m") & (obs["variable"] == "ndvi"), "time_utc"].astype(str))
-    done = _sr_qc_done(obs) | ok        # przyjęte wcześniejszą wersją kontroli nie są przeliczane
+    cur = _sr_qc_current(obs)
+    done = set(cur["time_utc"].astype(str))
+    ok = set(cur.loc[pd.to_numeric(cur["value"], errors="coerce") == 1, "time_utc"].astype(str))
     return {"scenes": len(keys), "sr_done": len(keys & done), "sr_ok": len(keys & ok),
             "remaining": len(keys - done)}
 
@@ -510,7 +518,7 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
     scenes = sorted(glob.glob(os.path.join(cfg["S2_DIR"], "S2_L2A_*.tif")))
     obs = registry_read(rt, "gwl_observations")
     done = {p: set(obs.loc[obs["product"] == p, "time_utc"].astype(str)) for p in ("S2_10m", "S2SR_2.5m")}
-    done["S2SR_2.5m"] |= _sr_qc_done(obs)      # odrzucone bieżącą wersją kontroli też są „zrobione”
+    done["S2SR_2.5m"] = _sr_qc_done(obs)       # „zrobione” = ocenione bieżącą wersją kontroli (także odrzucone)
     qc_calib = f"SEN2SRLite_main_{s3.SR_QC_VERSION}"
     state = {"sites": None, "model": None, "dev": None, "sr_error": None, "sr_seconds": 0.0}
     sr_cap = cfg["SR_MAX_SCENES_PER_RUN"] if cfg["SR_MAX_SCENES_PER_RUN"] is not None else len(scenes)
@@ -562,19 +570,25 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
                 state["sr_seconds"] += time.time() - t_sr
                 chk = s3.sr_checks(arr, arr25, cfg)
                 nsr += 1
-                for var in ("detail_ratio_min", "consistency_rmse_max", "sr_ok",
-                            "detail_ratio_min_20m", "consistency_rmse_max_20m", "sr_ok_20m"):
+                idx_ok = chk["sr_ok_indices"]
+                qc_vals = {v: chk[v] for v in ("detail_ratio_min", "consistency_rmse_max", "sr_ok",
+                                               "detail_ratio_min_20m", "consistency_rmse_max_20m", "sr_ok_20m")}
+                for idx in s3.INDEX_BANDS:
+                    qc_vals[f"sr_ok_{idx}"] = idx in idx_ok
+                    qc_vals[f"{idx}_sr_err"] = chk[f"{idx}_sr_err"]
+                for var, val in qc_vals.items():
                     qc.append({"site_id": "AOI", "product": "SR_QC", "variable": var, "time_utc": tkey, "orbit": 0,
-                               "value": float(chk[var]), "unit": "1", "n_pixels": np.nan, "qc_flags": "",
+                               "value": float(val), "unit": "1", "n_pixels": np.nan, "qc_flags": "",
                                "calib_id": qc_calib, "run_id": tag, "ingested_at": _utc_now()})
-                if chk["sr_ok"]:
-                    # NDVI z SR tylko po kontroli grupy 10 m; NDMI i NDRE (pasma 20 m) tylko po kontroli grupy 20 m
-                    nsr_ok += 1
-                    nsr_ok20 += int(chk["sr_ok_20m"])
-                    variables = ("ndvi", "ndmi", "ndre", "clear_frac") if chk["sr_ok_20m"] else ("ndvi", "clear_frac")
+                if idx_ok:
+                    # Każdy wskaźnik z 2,5 m tylko wtedy, gdy wszystkie jego pasma przeszły kontrolę (INDEX_BANDS)
+                    nsr_ok += int("ndvi" in idx_ok)
+                    nsr_ok20 += int("ndmi" in idx_ok)
+                    variables = tuple(idx_ok) + ("clear_frac",)
                     p25 = s3.profile_25m(prof)
                     c25 = np.repeat(np.repeat(cloud, 4, 0), 4, 1)
                     buf_sr.setdefault(variables, []).extend(s4.site_stats(arr25, c25, p25, sites, "S2SR_2.5m", t))
+                if chk["sr_ok"]:
                     if t.strftime("%Y-%m") in showcase or path == newest:
                         stem = os.path.join(cfg["SR_DIR"], f"{t:%Y%m%d}")
                         s1.write_geotiff(s4.compute_indices(arr25)["ndvi"], p25, stem + "_NDVI_2.5m.tif")
@@ -584,15 +598,15 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
                 else:
                     logger.warning(f"{tkey}: SR odrzucony (pasma 10 m: H-SR0={chk['pass_hsr0']}, "
                                    f"H-SR1={chk['pass_hsr1']}, RMSE={chk['consistency_rmse_max']:.4f})")
-                if not chk["sr_ok_20m"]:
-                    logger.info(f"{tkey}: SR pasm 20 m odrzucony (H-SR0={chk['pass_hsr0_20m']}, "
-                                f"H-SR1={chk['pass_hsr1_20m']}, RMSE={chk['consistency_rmse_max_20m']:.4f}) "
-                                f"— bez NDMI/NDRE z 2,5 m")
+                rejected = [i for i in s3.INDEX_BANDS if i not in idx_ok]
+                if rejected:
+                    logger.info(f"{tkey}: z 2,5 m bez {', '.join(rejected)} (pasma poza progiem); "
+                                f"przyjęte: {', '.join(idx_ok) or '—'}")
         if (n10 + nsr) % 25 == 0:
             flush()
     flush()
-    msg = (f"10 m: {n10} nowych scen; SR: {nsr} scen, {nsr_ok} przeszło kontrolę pasm 10 m (NDVI), "
-           f"{nsr_ok20} pasm 20 m (NDMI, NDRE)")
+    msg = (f"10 m: {n10} nowych scen; SR: {nsr} scen, NDVI 2,5 m przyjęte w {nsr_ok}, "
+           f"NDMI 2,5 m w {nsr_ok20} (próg 20 m: specyfikacja L2A × {cfg.get('SR_20M_SPEC_FACTOR', 1.0)})")
     if nsr:
         msg += f"; SR {state['sr_seconds'] / nsr:.1f} s/scenę na {state['dev']}"
     cov = sr_coverage(rt, cfg)
@@ -802,6 +816,14 @@ def _selftest(out_dir: str) -> None:
     assert s3.grid20_offset(lo20[s3.SEN2SR_BANDS.index("B11")]) == (1, 1)
     chk20 = s3.sr_checks(lo20, sr20, cfg)
     assert chk20["sr_ok"] and chk20["sr_ok_20m"], chk20
+    # Próg pasm 20 m wg specyfikacji L2A (0,05·ρ + 0,005): B05 z błędem 0,015 (> 0,01, ale < specyfikacja) przechodzi,
+    # B12 z błędem 0,03 nie; decyzja per wskaźnik: NDRE (B8A, B05) i NDMI (B8A, B11) tak, grupa 20 m jako całość nie.
+    sr20b = sr20.copy()
+    sr20b[s3.SEN2SR_BANDS.index("B05")] += 0.015
+    sr20b[s3.SEN2SR_BANDS.index("B12")] += 0.03
+    chk20b = s3.sr_checks(lo20, sr20b, cfg)
+    assert set(chk20b["sr_ok_indices"]) == {"ndvi", "ndmi", "ndre"} and not chk20b["sr_ok_20m"], chk20b
+    assert 0 < chk20b["ndre_sr_err"] < 0.1, chk20b["ndre_sr_err"]
     print("[OK] Kontrola SR: interpolacja odrzucona, spójny SR przyjęty (pasma 10 m i 20 m w natywnej rozdzielczości).")
 
     # Atrapa SEN2SR (bez GPU i pobierania modelu): powielenie pikseli 4x4 + szczegół o zerowej średniej w bloku,

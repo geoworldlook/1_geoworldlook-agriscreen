@@ -43,9 +43,15 @@ SR_FACTOR = 4
 MODEL_TILE = 128          # sen2sr.predict_large tnie obraz na kafelki 128x128 px (i wymaga kwadratu)
 # Wersja kontroli H-SR0/H-SR1 zapisywana w rejestrze (calib_id wierszy SR_QC). Zmiana wersji = sceny
 # ocenione starszą kontrolą są przeliczane jeden raz; sceny odrzucone bieżącą wersją nie są powtarzane.
-SR_QC_VERSION = "qc2"     # qc2: kontrola w natywnej rozdzielczości pasma, osobno grupy 10 m i 20 m
+SR_QC_VERSION = "qc3"     # qc2: natywna rozdzielczość pasma; qc3: pasma 20 m wg specyfikacji L2A, decyzja per wskaźnik
 BANDS_10M = ("B02", "B03", "B04", "B08")
 BANDS_20M = ("B05", "B06", "B07", "B8A", "B11", "B12")
+# Pasma wskaźników liczonych z SR (step_04.compute_indices). Wskaźnik z 2,5 m tylko, gdy wszystkie jego pasma przeszły.
+INDEX_BANDS = {"ndvi": ("B04", "B08"), "ndmi": ("B8A", "B11"), "ndre": ("B8A", "B05")}
+# Specyfikacja dokładności odbicia powierzchniowego L2A: 0,05·ρ + 0,005 (Vermote i in. 2008; używana w walidacji
+# korekcji atmosferycznej Sentinel-2, ACIX). Zasada dla pasm 20 m: SR nie dodaje więcej błędu, niż wynosi
+# niepewność samych danych wejściowych (× SR_20M_SPEC_FACTOR). Ryzyko przyjęte świadomie (docs/ARCHITEKTURA.md).
+L2A_SPEC_REL, L2A_SPEC_ABS = 0.05, 0.005
 
 
 # ==============================================================================
@@ -193,8 +199,14 @@ def sr_checks(arr10: np.ndarray, arr25: np.ndarray, cfg: Dict[str, Any]) -> Dict
     H-SR1: consistency_rmse = RMSE(SR uśredniony do natywnej rozdzielczości pasma, wejście) w reflektancji.
     Wynik dla grup pasm 10 m (BANDS_10M) i 20 m (BANDS_20M) = najgorsze pasmo w grupie.
       sr_ok      — grupa 10 m przeszła obie kontrole (SR można użyć do NDVI),
-      sr_ok_20m  — grupa 20 m przeszła obie kontrole (SR można użyć do NDMI i NDRE).
+      sr_ok_20m  — wszystkie pasma 20 m przeszły (informacyjnie).
+    Pasma 10 m: H-SR1 = RMSE ≤ SR_MAX_CONSISTENCY_RMSE (stały, surowy próg: NDVI jest rdzeniem detekcji).
+    Pasma 20 m: H-SR1 = RMSE ≤ SR_20M_SPEC_FACTOR · (0,05·ρ̄ + 0,005), ρ̄ = średnia reflektancja pasma w scenie.
+    Decyzja per wskaźnik (INDEX_BANDS): sr_ok_indices = wskaźniki, których wszystkie pasma przeszły H-SR0 i H-SR1;
+    {idx}_sr_err = szacowany błąd wskaźnika z RMSE jego pasm (propagacja błędu, pasma niezależne).
     """
+    factor = cfg.get("SR_20M_SPEC_FACTOR", 1.0)
+    band_ok: Dict[str, bool] = {}
     out: Dict[str, Any] = {}
     for group, bands, suffix in (("10m", BANDS_10M, ""), ("20m", BANDS_20M, "_20m")):
         ratios, rmses = [], []
@@ -203,8 +215,13 @@ def sr_checks(arr10: np.ndarray, arr25: np.ndarray, cfg: Dict[str, Any]) -> Dict
             if np.isfinite(arr10[i]).mean() < 0.5:
                 continue
             ratio, rmse = _band_checks(arr10[i], arr25[i], native_20m=(group == "20m"))
+            rho = float(np.nanmean(arr10[i]))
+            limit = (factor * (L2A_SPEC_REL * rho + L2A_SPEC_ABS)) if group == "20m" else cfg["SR_MAX_CONSISTENCY_RMSE"]
             out[f"detail_ratio_{name}"] = ratio
             out[f"consistency_rmse_{name}"] = rmse
+            out[f"consistency_limit_{name}"] = limit
+            out[f"mean_reflectance_{name}"] = rho
+            band_ok[name] = bool(ratio >= cfg["SR_MIN_DETAIL_RATIO"] and rmse <= limit)
             ratios.append(ratio)
             rmses.append(rmse)
         dr = float(np.nanmin(ratios)) if ratios else np.nan
@@ -212,9 +229,25 @@ def sr_checks(arr10: np.ndarray, arr25: np.ndarray, cfg: Dict[str, Any]) -> Dict
         out[f"detail_ratio_min{suffix}"] = dr
         out[f"consistency_rmse_max{suffix}"] = cr
         out[f"pass_hsr0{suffix}"] = bool(dr >= cfg["SR_MIN_DETAIL_RATIO"])
-        out[f"pass_hsr1{suffix}"] = bool(cr <= cfg["SR_MAX_CONSISTENCY_RMSE"])
+        checked = [b for b in bands if f"consistency_rmse_{b}" in out]
+        out[f"pass_hsr1{suffix}"] = bool(checked) and all(
+            out[f"consistency_rmse_{b}"] <= out[f"consistency_limit_{b}"] for b in checked)
         out[f"sr_ok{suffix}"] = out[f"pass_hsr0{suffix}"] and out[f"pass_hsr1{suffix}"]
+    out["sr_ok_indices"] = [idx for idx, bs in INDEX_BANDS.items() if all(band_ok.get(b, False) for b in bs)]
+    for idx, (a, b) in INDEX_BANDS.items():
+        out[f"{idx}_sr_err"] = _index_error(out, a, b)
     return out
+
+
+def _index_error(chk: Dict[str, Any], a: str, b: str) -> float:
+    """Błąd wskaźnika (A−B)/(A+B) z RMSE pasm (propagacja liniowa, błędy pasm niezależne), przy średnich ρ scen."""
+    try:
+        ra, rb = chk[f"mean_reflectance_{a}"], chk[f"mean_reflectance_{b}"]
+        ea, eb = chk[f"consistency_rmse_{a}"], chk[f"consistency_rmse_{b}"]
+    except KeyError:
+        return float("nan")
+    s = ra + rb
+    return float(2.0 * np.hypot(rb * ea, ra * eb) / (s * s)) if s > 0 else float("nan")
 
 
 # ==============================================================================

@@ -143,7 +143,7 @@ Publikacja tak jak w v5. Notatnik wysyła pliki do repozytorium strony tokenem G
 **Co jest już zrobione (2026-10-07):**
 - `VEG_PRODUCT = "S2SR_2.5m"`: do statusu wchodzi tylko NDVI ze scen po SEN2SR, które przeszły kontrolę pasm 10 m. Nie ma zastępstwa danymi 10 m.
 - Kontrola jest liczona w natywnej rozdzielczości pasma: H-SR0 sprawdza szczegół wobec interpolacji bikubicznej, H-SR1 spójność radiometryczną.
-- Pasma 10 m przechodzą (RMSE 0,002–0,004). Pasma 20 m nie przechodzą (RMSE 0,014–0,019 > 0,01), więc NDMI i NDRE z 2,5 m nie są używane.
+- Pasma 10 m przechodzą (RMSE 0,002–0,004, próg 0,01). Pasma 20 m (RMSE 0,008–0,019) od `qc3` oceniane są wg specyfikacji L2A 0,05·ρ + 0,005: B05, B06, B07, B8A, B11 przechodzą, B12 nie. NDMI i NDRE z 2,5 m wchodzą do danych z jawnym ryzykiem błędu ~0,03–0,04 na piksel (D-039).
 - Sceny idą od najnowszej. `sr_coverage` pokazuje postęp, a biuletyn podaje pokrycie SR.
 - NDVI 10 m jest liczony dalej jako odniesienie.
 
@@ -210,6 +210,7 @@ Publikacja tak jak w v5. Notatnik wysyła pliki do repozytorium strony tokenem G
 
 | Ryzyko | Obejście |
 |---|---|
+| Pasma 20 m po SR: błąd 4–9% reflektancji; NDMI/NDRE z 2,5 m ~±0,04 na piksel (ryzyko przyjęte, D-039) | Próg = specyfikacja L2A, decyzja per wskaźnik, błąd zapisany per scena w `SR_QC`; NDMI/NDRE z 2,5 m poza logiką statusu do wyniku testu paired; `SR_20M_SPEC_FACTOR` do zaostrzenia |
 | SR na CPU: ~60 s na scenę (log z 2026-10-07: 25 kafelków × ~2,4 s) | Środowisko Colab z GPU; limit `SR_MAX_SCENES_PER_RUN`; od najnowszych; czas i urządzenie w `gwl_runs` |
 | Klimatologia NDVI 2,5 m niepełna, dopóki SR nie obejmie wszystkich lat | Komunikat i pokrycie SR w biuletynie; status bez warstwy roślinności, gdy brak anomalii 2,5 m |
 | Międzyrzędzie (trawa, koszenie, uprawa) dominuje sygnał S-2 w winnicy (A16, W15) | Atrybut `inter_row` na karcie; przy `inter_row = grassed` pewność warstwy roślinności o poziom niżej |
@@ -235,6 +236,7 @@ Publikacja tak jak w v5. Notatnik wysyła pliki do repozytorium strony tokenem G
 | D-036 | Zmiany metody z przeglądu F3 (sekcja 5): Z1 pełna logika EDO CDI v4.1.1, Z2 warstwa roślinności w statusie VI–IX (po teście POD/FAR zapisanym przed zmianą), Z4 wspólny pas brzegowy w metrach; następnie Z8, Z3, Z5, Z6 |
 | D-037 | Dodatkowe wskaźniki z F3, sekcja 6: Z11 NDMI z pasm natywnych i Z9 SPEI-3 na karcie; Z10 CGLS SWI jako drugie źródło gleby; Z12 fAPAR i Z13 LST Landsat jako testy według zasady 6.2. Bez VCI, kNDVI, NDRE, OPTRAM/STR i S-1 na poziomie działki |
 | D-038 | Wskaźniki wody z korektą tła (F3, sekcja 7): Z14 — CRSWIR, NMDI, GVMI, NDWI/EVI w natywnych 20 m + odjęcie tła zimowego, jeden wspólny test; Z15 rozmieszanie przestrzenne później |
+| D-039 | **Przyjęte (2026-10-07):** pasma 20 m po SR oceniane wg specyfikacji dokładności L2A (0,05·ρ + 0,005, `SR_20M_SPEC_FACTOR` = 1,0) zamiast stałego 0,01; decyzja per wskaźnik; NDMI i NDRE z 2,5 m w danych z zapisanym błędem; w statusie dopiero po teście paired |
 
 ---
 
