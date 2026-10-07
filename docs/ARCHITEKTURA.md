@@ -28,6 +28,7 @@ z flagą `+dirty`, parametry, liczba nowych wierszy). Błąd zadania jest zapisy
 | `step_04_metrics_alert.py` | Indeksy, anomalie, status, biuletyn | `compute_indices` (NDVI, NDMI, NDRE), `site_stats`, `clim_anomaly`, `spi`, `era5_anomalies`, `scene_anomaly`, `build_status`, `build_bulletin` |
 | `step_05_colab_run.py` | Sterowanie i rejestr | `setup_runtime`, `run_task`, `registry_read/upsert`, `MONITOR_CONFIG`, `monitor_config`, zadania `task_*`, `run_monitoring`, `--selftest` |
 | `step_07_station_pipeline.py` | Stacja ISMN (samodzielny potok) i walidacja anomalii | `qc_insitu`, `extract_satellite` (S-1, S-2, ERA5 z cache), `s1_change_detection`, `evaluate` (metryki z CI z bootstrapu blokowego), `run_station_pipeline`, `validate_anomalies` |
+| `step_06_dashboard.py` | Dashboard winnicy (HTML, wzór: panel Wago z ESA WineEO) | `save_site_ndvi` (wycinki NDVI działki z `task_scene_stats`), `build_dashboard` (mapa NDVI na zdjęciu satelitarnym z wyborem daty, status, ryzyko suszy, przyczyny, pogoda ERA5 + prognoza Open-Meteo, wiarygodność), `show_dashboard` |
 | `build_colab_master.py` | Generator `notebooks/AgriWatch_Monitor.ipynb` | `create_monitor_notebook` |
 
 Zależności między modułami: `step_05` importuje `step_01/03/04/07` leniwie (wewnątrz zadań);
@@ -43,6 +44,7 @@ Zależności między modułami: `step_05` importuje `step_01/03/04/07` leniwie (
 | `task_anomalies` | ERA5, obserwacje roślinności | `gwl_anomalies`, `gwl_status`, CSV w `OUTPUT_DIR` |
 | `task_validate` | anomalie i status | `gwl_validation_metrics` (R anomalii vs ISMN 5/20/30 cm, POD/FAR) |
 | `task_bulletin` | status, anomalie, walidacja | `bulletin.md`, wykresy PNG, `agriwatch_latest.json` |
+| `task_dashboard` | wyniki powyżej + wycinki NDVI działki (`SR_DIR/site_ndvi/`) | `dashboard.html` |
 
 ## 4. Metoda
 

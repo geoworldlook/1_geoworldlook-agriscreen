@@ -25,6 +25,7 @@ Błąd anomalii jest walidowany na profilu glebowym stacji ISMN Condom (5–30 c
 ├── step_03_super_resolve.py     # SEN2SRLite 10 m -> 2,5 m z kontrolą H-SR0/H-SR1 (bez zastępstwa interpolacją)
 ├── step_04_metrics_alert.py     # indeksy obiektów, anomalie klimatologiczne, SPI, status dekadowy, biuletyn
 ├── step_05_colab_run.py         # sterowanie z notatnika: setup_runtime, run_task, rejestr gwl_*, zadania monitoringu
+├── step_06_dashboard.py         # dashboard winnicy (wzór: panel Wago, ESA WineEO): mapa NDVI, status, ryzyko, pogoda
 ├── step_07_station_pipeline.py  # stacja ISMN Condom: QC in situ, S-1 change detection, walidacja z CI
 ├── build_colab_master.py        # generator notatnika
 ├── notebooks/AgriWatch_Monitor.ipynb
@@ -43,8 +44,16 @@ Numeracja kroków nie jest ciągła: kroki 2 i 6 z v2.5 są w `legacy/`.
 1. Otwórz `notebooks/AgriWatch_Monitor.ipynb` w Colab (Plik → Otwórz → GitHub), środowisko z GPU.
 2. `Uruchom wszystko`. Notatnik montuje Dysk, klonuje lub aktualizuje repozytorium w `MyDrive/GeoWorldLook/agriwatch`,
    instaluje pakiety, inicjalizuje GEE (projekt `ee-geoworldlook`) i wykonuje zadania:
-   `ingest_s2 → ingest_era5 → scene_stats → anomalies → validate → bulletin`.
-3. Wyniki: `data/05_Final_Outputs/agriwatch/` (biuletyn, wykresy, `agriwatch_latest.json`) i tabele `data/registry/gwl_*.csv`.
+   `ingest_s2 → ingest_era5 → scene_stats → anomalies → validate → bulletin → dashboard`.
+3. Wyniki: `data/05_Final_Outputs/agriwatch/` (**`dashboard.html`**, biuletyn, wykresy, `agriwatch_latest.json`)
+   i tabele `data/registry/gwl_*.csv`. Dashboard wyświetla się w notatniku (sekcja 6).
+
+## Zakres wersji 1.0 (zamrożony 2026-10-07)
+
+Jedna winnica (`VINEYARD_06`), status EDO z SPI, wilgotności gleby ERA5-Land i NDVI 2,5 m, dashboard w Colab.
+Do wydania zmieniamy tylko błędy, nie metodę. NDMI, NDRE i CRSWIR liczą się w tle do walidacji.
+Propozycje rozwoju (Z1–Z15, 15 winnic, strona WWW, powiadomienia) czekają na wersję 1.1:
+`docs/plans/Plan_v6_platforma_anomalii_wilgotnosci.md`, `docs/evidence/F3_przeglad_literatury_platforma.md`.
 
 Testy offline (bez GEE i GPU; prawdziwe dane ISMN i działki, syntetyczne dane satelitarne):
 

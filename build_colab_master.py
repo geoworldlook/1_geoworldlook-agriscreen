@@ -10,7 +10,7 @@ CELLS = [
 Otwieraj z GitHub (Plik → Otwórz → GitHub). Środowisko z **GPU** (dla SEN2SR). Potem `Uruchom wszystko`.
 
 Łańcuch: Sentinel-2 (rastry, jak w v1) → SEN2SR 2,5 m z kontrolą → indeksy winnicy → anomalie (ERA5-Land SMA, SPI, NDVI)
-→ status dekadowy wg logiki EDO CDI → walidacja na ISMN Condom → biuletyn i JSON dla strony.
+→ status dekadowy wg logiki EDO CDI → walidacja na ISMN Condom → biuletyn i **dashboard winnicy**.
 Wyniki: `MyDrive/GeoWorldLook/agriwatch/data/05_Final_Outputs/agriwatch/` i tabele `data/registry/gwl_*.csv`."""),
     ("md", "## 1. Dysk Google i kod z GitHub"),
     ("code", """import os, sys
@@ -44,7 +44,8 @@ print('Projekt:', PROJECT_DIR)"""),
     ("md", "## 2. Środowisko: pakiety, GEE, rejestr, konfiguracja"),
     ("code", """from step_05_colab_run import (setup_runtime, monitor_config, run_task, run_history, registry_summary,
                                task_ingest_s2, task_ingest_era5, task_scene_stats, task_anomalies,
-                               task_validate, task_bulletin)
+                               task_validate, task_bulletin, task_dashboard)
+from step_06_dashboard import show_dashboard
 rt = setup_runtime(PROJECT_DIR, gee_project='ee-geoworldlook', pull=False)
 cfg = monitor_config(rt)   # zmiany: monitor_config(rt, {'VINEYARDS': {'VINEYARD_06': 6, 'VINEYARD_07': 7}})"""),
     ("md", "## 3. Dane: rastry Sentinel-2 (przyrostowo) i ERA5-Land 1991 → dziś"),
@@ -56,17 +57,13 @@ run_task(rt, 'ingest_era5', task_ingest_era5, rt, cfg)"""),
     ("code", """run_task(rt, 'anomalies', task_anomalies, rt, cfg)
 run_task(rt, 'validate', task_validate, rt, cfg)
 run_task(rt, 'bulletin', task_bulletin, rt, cfg)"""),
-    ("md", "## 6. Panel"),
-    ("code", """from IPython.display import display, Image, Markdown
-out = cfg['OUTPUT_DIR']
-for f in ('last_12_months.png', f"season_{cfg['SHOWCASE_SEASON']}.png"):
-    p = os.path.join(out, f)
-    if os.path.exists(p):
-        display(Image(filename=p))
-p = os.path.join(out, 'bulletin.md')
-if os.path.exists(p):
-    display(Markdown(open(p, encoding='utf-8').read()))
-display(registry_summary(rt))
+    ("md", """## 6. Dashboard winnicy
+Mapa NDVI na zdjęciu satelitarnym (wybór daty), status, ryzyko suszy, przyczyny, pogoda i prognoza, wiarygodność.
+Plik: `data/05_Final_Outputs/agriwatch/dashboard.html` (można otworzyć w przeglądarce z Dysku)."""),
+    ("code", """run_task(rt, 'dashboard', task_dashboard, rt, cfg)
+show_dashboard(os.path.join(cfg['OUTPUT_DIR'], 'dashboard.html'))"""),
+    ("md", "## 7. Rejestr i historia uruchomień"),
+    ("code", """display(registry_summary(rt))
 display(run_history(rt, n=10))"""),
 ]
 

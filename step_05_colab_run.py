@@ -513,8 +513,20 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
     import step_01_ingest as s1
     import step_03_super_resolve as s3
     import step_04_metrics_alert as s4
+    import step_06_dashboard as s6
 
     use_sr = cfg["USE_SR"] if use_sr is None else use_sr
+    clip_dir = os.path.join(cfg["SR_DIR"], s6.SITE_CLIP_DIR, cfg["MAIN_SITE"])
+
+    def site_clip(ndvi, profile, t, res):
+        """Wycinek NDVI winnicy do mapy w dashboardzie (mały GeoTIFF int16)."""
+        g = state["sites"].loc[state["sites"]["site_id"] == cfg["MAIN_SITE"], "geometry"]
+        if len(g):
+            s6.save_site_ndvi(np.where(cloud_mask(profile, ndvi.shape) == 0, ndvi, np.nan), profile, g.iloc[0],
+                              os.path.join(clip_dir, f"{t:%Y%m%d}_NDVI_{res}.tif"))
+
+    def cloud_mask(profile, shape):
+        return cloud if shape == cloud.shape else np.repeat(np.repeat(cloud, 4, 0), 4, 1)
     tag = f"scene_stats_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
     scenes = sorted(glob.glob(os.path.join(cfg["S2_DIR"], "S2_L2A_*.tif")))
     obs = registry_read(rt, "gwl_observations")
@@ -557,6 +569,7 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
         sites = state["sites"]
         if need10:
             buf.extend(s4.site_stats(arr, cloud, prof, sites, "S2_10m", t))
+            site_clip(s4.compute_indices(arr)["ndvi"], prof, t, "10m")
             n10 += 1
         if needsr:
             if state["model"] is None:
@@ -590,6 +603,8 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
                     p25 = s3.profile_25m(prof)
                     c25 = np.repeat(np.repeat(cloud, 4, 0), 4, 1)
                     buf_sr.setdefault(variables, []).extend(s4.site_stats(arr25, c25, p25, sites, "S2SR_2.5m", t))
+                    if "ndvi" in idx_ok:
+                        site_clip(s4.compute_indices(arr25)["ndvi"], p25, t, "2.5m")
                 if chk["sr_ok"]:
                     if t.strftime("%Y-%m") in showcase or path == newest:
                         stem = os.path.join(cfg["SR_DIR"], f"{t:%Y%m%d}")
@@ -727,6 +742,13 @@ def task_bulletin(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     return {"message": ", ".join(os.path.relpath(p, cfg["PROJECT_DIR"]) for p in paths.values())}
 
 
+def task_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = True) -> Dict[str, Any]:
+    """Dashboard winnicy (step_06): dashboard.html w OUTPUT_DIR — mapa NDVI, status, ryzyko, pogoda, wiarygodność."""
+    import step_06_dashboard as s6
+    path = s6.build_dashboard(rt, cfg, forecast=forecast)
+    return {"message": os.path.relpath(path, cfg["PROJECT_DIR"])}
+
+
 def run_monitoring(rt: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None, ingest: bool = True) -> None:
     """Wszystkie zadania po kolei (każde zapisane w gwl_runs; błąd jednego nie zatrzymuje kolejnych)."""
     cfg = cfg or monitor_config(rt)
@@ -737,6 +759,7 @@ def run_monitoring(rt: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None, ing
     run_task(rt, "anomalies", task_anomalies, rt, cfg)
     run_task(rt, "validate", task_validate, rt, cfg)
     run_task(rt, "bulletin", task_bulletin, rt, cfg)
+    run_task(rt, "dashboard", task_dashboard, rt, cfg)
 
 
 # ==============================================================================
@@ -847,7 +870,8 @@ def _selftest(out_dir: str) -> None:
     s3.super_resolve = fake_super_resolve
     try:
         for name, fn in (("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
-                         ("validate", task_validate), ("bulletin", task_bulletin)):
+                         ("validate", task_validate), ("bulletin", task_bulletin),
+                         ("dashboard", lambda r, c: task_dashboard(r, c, forecast=False))):
             run_task(rt, name, fn, rt, cfg, raise_errors=True)
         res = run_task(rt, "scene_stats_repeat", task_scene_stats, rt, cfg, raise_errors=True)
     finally:
@@ -867,6 +891,10 @@ def _selftest(out_dir: str) -> None:
     with open(os.path.join(cfg["OUTPUT_DIR"], "agriwatch_latest.json"), encoding="utf-8") as f:
         js = json.load(f)
     assert js["current"]["cdi_class"] in ("normal", "watch", "warning", "alert", "recovery")
+    dash = open(os.path.join(cfg["OUTPUT_DIR"], "dashboard.html"), encoding="utf-8").read()
+    n_layers = dash.count('"png": "')
+    assert "Ryzyko suszy" in dash and "L.imageOverlay" in dash and n_layers >= 5, n_layers
+    print(f"[OK] Dashboard: {n_layers} dat mapy NDVI, {len(dash) // 1024} kB")
     print("[OK] Selftest monitoringu. Status:", js["current"]["date"], js["current"]["cdi_class"])
     print(val[["product", "reference", "segment", "subset", "metric", "value", "n"]].round(3).to_string(index=False))
 
