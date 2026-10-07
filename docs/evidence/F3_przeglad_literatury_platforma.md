@@ -191,6 +191,81 @@ Kolejność według stosunku wartości do kosztu.
 
 ---
 
+## 6. Inne wskaźniki: co wnoszą i czy je dodać
+
+**Punkt wyjścia z naszych danych** (`Plan_v4`, sekcja 2; Condom, okres kalibracji 2016–2021, wartości surowe, nie anomalie):
+
+| Źródło | R z czujnikiem 20–30 cm |
+|---|---|
+| ERA5-Land | 0,83 |
+| NDVI S-2 | 0,56 |
+| STR S-2 | 0,39 |
+| OPTRAM S-2 | 0,35 |
+| Sentinel-1 change detection (bufor 50 m) | 0,34 |
+
+ERA5 z dodanymi satelitami nie był lepszy od samego ERA5 (0,81 vs 0,81). Na jednej stacji satelity nie poprawiają więc przebiegu w czasie.
+
+**Co z tego wynika dla oceny wskaźników:**
+- Wskaźnik roślinny ma inną rolę: pokazać, **która winnica** odstaje od sąsiednich.
+- Jedna stacja ISMN tego nie sprawdzi. Do oceny wskaźników roślinnych potrzebne są:
+  - zgodność ze zdarzeniami (np. 2022),
+  - odporność na zabiegi,
+  - docelowo obserwacje terenowe (pilotaż).
+
+### 6.1 Przegląd według warstw wzorca EDO
+
+| Warstwa | Wskaźnik | Co mówi literatura | Ocena dla nas |
+|---|---|---|---|
+| Opad | **SPI-1, SPI-3** (mamy) | Wskaźnik WMO, używany w EDO (F3, 1.1) | Zostaje (logika EDO) |
+| Opad + parowanie | **SPEI-3** (opad − ET0) | SPEI dodaje zapotrzebowanie atmosfery na wodę (Vicente-Serrano 2010). W porównaniu globalnym różnice z SPI są małe, ale latem SPEI najlepiej koreluje z skutkami suszy. Wzrost temperatury nasila susze w płd. Europie (Vicente-Serrano 2014) — [przegląd UniRioja](https://investigacion.unirioja.es/documentos/5ea025a5a56eaf31994806ef?lang=en), [NHESS 2019](https://nhess.copernicus.org/articles/19/1215/2019/) | **Dodać jako przyczynę na karcie (Z9).** Lata 2022 i 2026 to susza z upałem, a SPI tego nie widzi. Do logiki statusu dopiero po teście |
+| Gleba | **SMA ERA5-Land 0–100 cm** (mamy) | R anomalii 0,58 w Condom; ERA5-Land najlepszy z 4 produktów w Núñez-Ibarra 2025 | Zostaje |
+| Gleba | **CGLS SWI 1 km** (ASCAT + S-1, filtr wykładniczy) | Metoda filtra wykładniczego (Albergel 2008, [HESS 12:1323](https://hess.copernicus.org/articles/12/1323/2008/)) powstała **na sieci SMOSMANIA**. SWI dobrze oddaje wilgotność strefy korzeni | **Dodać jako niezależne drugie źródło gleby (Z10)**: zgodność ERA5 i SWI podnosi pewność, rozbieżność ją obniża |
+| Gleba | Sentinel-1 SSM 1 km (CLMS) | Balenzano 2021 ([rsc4earth](https://rsc4earth.de/publication/balenzano-sentinel-1-2021/)): 167 stacji, R 0,54, RMSE 0,07 m³/m³; tylko 5 cm | Nie jako warstwa główna: płytko, a w oczku 1 km jest wiele upraw |
+| Gleba | Sentinel-1 change detection 50 m (mamy w `step_07`) | Nasze: R 0,34; szum plamkowy | **Nie** dla działki |
+| Gleba (optyka) | STR, OPTRAM | Sadeghi 2017 ([RSE 198:52](https://experts.umn.edu/en/publications/the-optical-trapezoid-model-a-novel-approach-to-remote-sensing-of/)): błąd ~0,04 m³/m³ w zlewniach półsuchych; wymaga kalibracji krawędzi trapezu | **Nie**: nasze R 0,35–0,39; okrywa winnicy zakłóca sygnał gleby |
+| Roślinność | **NDVI** (mamy; SR 2,5 m) | Zielona masa; w winnicy miesza rząd i międzyrzędzie (F3, 1.2) | Zostaje (Z2–Z5) |
+| Roślinność, woda | **NDMI / NDWI (Gao)** (NIR–SWIR) | Brak pracy z NDMI vs Ψstem na S-2. NDWI: R² 0,54–0,67 na datę, MSI 0,53–0,63; NDWI/EVI najlepszy w dwóch winnicach w Belgii (Delval i in., [EGU22-3908](https://meetingorganizer.copernicus.org/EGU22/EGU22-3908.html), konferencja). TerraNIS używa SWIR B11 (F3, 1.3). NDWI reaguje szybciej niż NDVI | **Dodać jako drugi wskaźnik roślinny na karcie (Z11)**, liczony **z pasm natywnych 10/20 m** (pasma 20 m po SR nie przechodzą H-SR1). Nasze R ≈ 0,4, tak jak NDVI — do statusu tylko, jeśli test paired pokaże wartość dodaną |
+| Roślinność | **fAPAR / LAI (S-2, SL2P)** | Zmienna EDO. SL2P (Weiss i Baret 2016) dostępny w GEE (LEAF Toolbox). Dobrze dla jednorodnych upraw; zaniża LAI w łanach niejednorodnych (brak skupienia liści w modelu) — [Brown i in., Southampton](https://eprints.soton.ac.uk/503206/) | **Opcjonalnie (Z12)**: zgodność z EDO, ale winnica to łan rzędowy; zysk względem NDVI do pokazania |
+| Roślinność | NDRE, CIre (red-edge) | Reagują na chlorofil i azot, nie wprost na wodę; dłużej czułe w gęstym łanie | **Nie** do suszy; ewentualnie do wigoru |
+| Roślinność | kNDVI, NIRv | Odpowiedź na nasycenie NDVI w gęstym łanie; kNDVI zależy od parametru jądra | **Nie**: NDVI winnicy (0,4–0,6) nie jest nasycone |
+| Roślinność | VCI / VHI (Kogan) | VCI = położenie w zakresie min–max z lat. Krótki zapis danych to znana słabość ([droughtmanagement.info](https://www.droughtmanagement.info/vegetation-condition-index-vci/)) | **Nie**: przy 9–10 latach S-2 min i max są niestabilne. Nasz z-score i percentyl robią to samo stabilniej |
+| Termika | **LST Landsat 8/9** (100 m, próbkowane do 30 m) | Najbardziej bezpośredni sygnał stresu (zamykanie aparatów szparkowych). Termika wykrywa stres, którego nie widzą wskaźniki odbiciowe (USDA ARS: [NASA Landsat](https://landsat.gsfc.nasa.gov/article/landsat-thermal-data-provides-insight-to-vintners)). CWSI winorośli z czujników naziemnych: R² 0,83 z Ψliścia; wymaga kalibracji na fazę i odmianę ([Bellvert 2013](https://quantalab.ias.csic.es/pdf/PrecAgricul_CWSI%20Bellvert%202013_n.pdf)) | **Eksperyment (Z13)**: winnice 0,7–4 ha to 1–4 piksele termiczne; anomalia LST względem sąsiednich działek w dniu przelotu (L8 + L9 co ~8 dni) |
+| Termika | ECOSTRESS (70 m) | Różne pory dnia; produkt ESI ([JPL](https://ecostress.jpl.nasa.gov/)) | **Nie** jako podstawa: nieregularne przeloty, misja do ~2026 |
+| Termika | S-3 LST 1 km + wyostrzanie (DMS/TsHARP) | Sen-ET: wyostrzanie do 20 m; walidacja ET na 8 wieżach (w tym winnice Hérault): R 0,60, RMSE 1,38 mm/d ([Guzinski, LPS 2022](https://earth.esa.int/living-planet-symposium-2022-presentations/25.05.Wednesday/H1-01/1330-1510/05_Guzinski_2_.pdf)). pyDMS: R > 0,74 z temperaturą gleby, RMSE 4–15 °C | **Nie teraz**: duży błąd na poziomie działki; kod jest w `legacy/` (v2.5). Wrócić przy TRISHNA |
+
+### 6.2 Zasada doboru wskaźnika
+
+Każdy nowy wskaźnik przechodzi ten sam test, zapisany przed obliczeniem:
+
+1. **R anomalii** z czujnikiem 20–30 cm na tych samych dniach co wskaźnik odniesienia (paired), z 95% CI.
+2. **Wartość dodana:** korelacja cząstkowa z czujnikiem po usunięciu wpływu ERA5 SMA. Wskaźnik, który nie dodaje nic do ERA5, nie wchodzi do logiki statusu, najwyżej na kartę.
+3. **Zdarzenia:** czy w 2022 (VII–IX) wskaźnik pokazuje anomalię ≤ −1 w ≥ 12 z 15 winnic (V4 z `Plan_v6`).
+4. **Odporność na zabiegi:** odsetek zmian znaku anomalii dekada do dekady w IV–V (niższy = lepiej).
+
+### 6.3 Propozycje (ciąg dalszy Z1–Z8)
+
+| ID | Zmiana | Uzasadnienie | Koszt |
+|---|---|---|---|
+| Z9 | SPEI-3 z ERA5-Land (ET0 metodą Hargreavesa z Tmin/Tmax albo FAO Penman-Monteith z promieniowania, wiatru i punktu rosy) na karcie jako przyczyna | Susze z upałem; SPI ich nie widzi | 1–2 h (dodatkowe pasma ERA5-Land w `step_01`) |
+| Z10 | CGLS SWI 1 km (T = 10–40) jako drugie źródło anomalii gleby; zgodność z ERA5 w polu `confidence` | Niezależny pomiar satelitarny; metoda z sieci SMOSMANIA | 2–3 h (dostęp GEE/CDSE do sprawdzenia) |
+| Z11 | NDMI z pasm natywnych (10/20 m) dla każdej winnicy: anomalia na karcie; test paired vs NDVI | SWIR jest czuły na wodę w liściach; TerraNIS używa B11 | 1 h (`compute_indices` już liczy NDMI) |
+| Z12 | fAPAR S-2 (SL2P) jako alternatywa NDVI w warstwie roślinności; test wg 6.2 | Zgodność z EDO | 3–4 h |
+| Z13 | Eksperyment: anomalia LST Landsat 8/9 winnicy względem mediany winnic AOI w dniu przelotu | Najbardziej bezpośredni sygnał stresu | 4–6 h |
+
+**Nie dodajemy:**
+- VCI (krótki zapis),
+- kNDVI i NIRv (brak nasycenia),
+- NDRE do suszy (to wskaźnik chlorofilu),
+- STR, OPTRAM i S-1 na poziomie działki (nasze R ≤ 0,39),
+- ECOSTRESS (nieregularny, kończąca się misja),
+- wyostrzone LST S-3 (błąd za duży dla działki).
+
+**Kolejność:** Z11 i Z9 (tanie, wartość na karcie od razu) → Z10 → Z12 → Z13.
+
+**Źródła sekcji 6:** wszystkie na poziomie `snippet` (pełne teksty zablokowane), poza danymi własnymi z `Plan_v4`.
+
+---
+
 ## Źródła
 
 **Pełny tekst (przekazane przez użytkownika):**
@@ -199,4 +274,4 @@ Kolejność według stosunku wartości do kosztu.
 3. Laroche-Pinel E., Duthoit S., Costard A. D., Rousseau J., Hourdel J., Vidal-Vigneron M., Cheret V., Clenet H. (2021). OENO One 55(4):115–127. DOI 10.20870/oeno-one.2021.55.4.4752.
 4. Núñez-Ibarra D. A., Zambrano-Bigiarini M., Galleguillos M. (2025). EGUsphere, preprint. DOI 10.5194/egusphere-2025-2606.
 
-**Streszczenia wyszukiwania (snippet):** Sozzi i in. 2020; Devaux i in. 2019; Ji i Peters 2003; Beck i in. 2021; Groenveld i in. 2023; klasy Carbonneau; opensr-test — linki w tabeli w sekcji 2.
+**Streszczenia wyszukiwania (snippet):** źródła z sekcji 6 (linki w tabeli 6.1); Sozzi i in. 2020; Devaux i in. 2019; Ji i Peters 2003; Beck i in. 2021; Groenveld i in. 2023; klasy Carbonneau; opensr-test — linki w tabeli w sekcji 2.
