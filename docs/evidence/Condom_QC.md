@@ -1,6 +1,6 @@
 # Kontrola jakości danych referencyjnych — ISMN SMOSMANIA Condom
 
-> **Data:** 2026-09-26 · **Status:** `Draft` (analiza eksploracyjna; reguły QC do wdrożenia w `step_06_station_api.py` w M1)
+> **Data:** 2026-09-26 · **Status:** `Draft` (analiza eksploracyjna; reguły QC wdrożone w `step_07_station_pipeline.py`, funkcja `qc_insitu`)
 > **Dane:** `data/7_isismn_data/SMOSMANIA/Condom/*.stm` (ISMN, 2016-01-01 → 2025-01-01, godzinowe), tylko rekordy z flagą `G`
 
 ![Condom QC](figures/condom_qc.png)

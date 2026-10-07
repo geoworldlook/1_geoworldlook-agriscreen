@@ -1,112 +1,59 @@
-# S-3/S-2 AgriScreen DSS v2.5
-### System Wczesnego Wykrywania Anomalii Wilgotnościowych i Fizjologicznych w Uprawach Wieloletnich
+# AgriWatch — monitoring suszy dla winnicy (Condom, Gers)
 
-[![GitHub Repo](https://img.shields.io/badge/GitHub-geoworldlook%2F1__geoworldlook--agriscreen-blue?logo=github)](https://github.com/geoworldlook/1_geoworldlook-agriscreen)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/geoworldlook/1_geoworldlook-agriscreen/blob/main/AgriScreen_Colab_Master.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/geoworldlook/1_geoworldlook-agriscreen/blob/main/notebooks/AgriWatch_Monitor.ipynb)
 
-Potok przetwarzania teledetekcyjnego w języku **Python 3.10+**, zoptymalizowany pod środowisko **Google Colab (GPU T4, 12 GB RAM)** oraz chmurowy silnik **Google Earth Engine (GEE)**.
-Dane i gotowe produkty GeoTIFF przechowywane są trwale na **Dysku Google** (`/content/drive/MyDrive/1_geoworldlook-agriscreen`).
+Monitoring anomalii suszy dla jednej winnicy (`VINEYARD_06`, 2,9 ha, 136 m od stacji ISMN SMOSMANIA Condom)
+z otwartych danych: Sentinel-2, ERA5-Land i opcjonalnie super-resolution SEN2SR 2,5 m.
+Status dekadowy wzorowany na Combined Drought Indicator (CDI) Europejskiego Obserwatorium Suszy (EDO):
 
-System analizuje rzeczywiste dane satelitarne dla upraw wieloletnich (sady owocowe, winnice) w rejonie poligonu badawczego **GBOV Condom (Gers, Francja)** zdefiniowanego w pliku [`data/1_AOI_GBOV_CONDOM.geojson`](file:///c:/Users/dawids/OneDrive%20-%20opegieka.pl/Pulpit/OneDrive%20-%20opegieka.pl/Pulpit/DAWID/GEOWORLDLOOK/2_geoworldlook/data/1_AOI_GBOV_CONDOM.geojson).
+| Status | Warunek | Akcja |
+|---|---|---|
+| `watch` | SPI-1 ≤ −2 lub SPI-3 ≤ −1 (deficyt opadu) | watch |
+| `warning` | anomalia wilgotności strefy korzeni (ERA5-Land 0–100 cm) ≤ −1 | watch |
+| `alert` | `warning` oraz anomalia NDVI winnicy ≤ −1 | inspect |
+| `recovery` | po `warning`/`alert` spadek poniżej progów, anomalie nadal ujemne | normal |
 
----
+Błąd anomalii jest walidowany na profilu glebowym stacji ISMN Condom (5–30 cm).
 
-## Architektura Modułowa i Struktura Projektu
+**Architektura:** kod na GitHub → obliczenia w Google Colab (GPU, Google Earth Engine) → Dysk Google jako baza danych
+(`MyDrive/GeoWorldLook/agriwatch`, tabele CSV `data/registry/gwl_*`). Szczegóły: [`docs/ARCHITEKTURA.md`](docs/ARCHITEKTURA.md).
 
-Struktura katalogów została zaprojektowana zgodnie z wymogiem płaskiej struktury Colab (`/content/`) oraz dedykowanej hierarchii danych:
+## Struktura repozytorium
 
 ```text
-2_geoworldlook/
-│
+├── step_01_ingest.py            # GEE: Sentinel-2 L2A (przyrostowo, manifest) + maska chmur, ERA5-Land w punkcie, GeoTIFF I/O
+├── step_03_super_resolve.py     # SEN2SRLite 10 m -> 2,5 m z kontrolą H-SR0/H-SR1 (bez zastępstwa interpolacją)
+├── step_04_metrics_alert.py     # indeksy obiektów, anomalie klimatologiczne, SPI, status dekadowy, biuletyn
+├── step_05_colab_run.py         # sterowanie z notatnika: setup_runtime, run_task, rejestr gwl_*, zadania monitoringu
+├── step_07_station_pipeline.py  # stacja ISMN Condom: QC in situ, S-1 change detection, walidacja z CI
+├── build_colab_master.py        # generator notatnika
+├── notebooks/AgriWatch_Monitor.ipynb
 ├── data/
-│   ├── 1_AOI_GBOV_CONDOM.geojson      # Granice 23 działek testowych (sady, winnice, gleba)
-│   ├── 00_Metadata/                   # Manifest pobranych scen (ingest_manifest.json)
-│   ├── 01_Raw_Sentinel2/              # Pobrane sceny S2 L2A (10 pasm + maska chmur)
-│   ├── 02_Raw_Thermal_LST/            # Dane termalne LST 1km (S3 SLSTR / Copernicus Thermal)
-│   ├── 03_Copernicus_Auxiliary/       # Copernicus DEM GLO-30, CGLS SWI 8 poziomów, CLMS HR-VPP ST
-│   ├── 04_Upscaled_LST_10m/           # Wynikowe rastry LST po upscalingu 10m (H-pyDMS / TsHARP)
-│   ├── 05_Final_Outputs/              # Gotowe COG GeoTIFF (2.5m), alerty i raporty walidacyjne
-│   └── 06_Landsat_Validation/         # Referencyjne dane Landsat 30m, mapy reszt i raporty walidacji
-│
-├── step_01_ingest.py                  # Moduł 1: Ingestia GEE, CDSE API (SWI 8-depths, HR-VPP PPI)
-├── step_02_align_and_scale.py         # Moduł 2: Korejestracja AROSICS i deagregacja H-pyDMS (1km -> 10m)
-├── step_03_super_resolve.py           # Moduł 3: SEN2SR 2.5m (RGBN) i fuzja geostatystyczna ATPRK
-├── step_04_metrics_alert.py           # Moduł 4: Wskaźniki TCARI/OSAVI, TVDI, Z-score i Protokół Walda
-├── step_05_colab_run.py               # Moduł 5: Master Orchestrator potoku
-├── step_06_landsat_validation.py      # Moduł 6: Walidacja Landsat 8/9 ST (30m) i analiza błędów
-│
-├── test_pipeline.py                   # Skrypt testowy integracji modułów i odporności numerycznej
-├── notebooks/
-│   └── AgriScreen_Colab_Pipeline.ipynb # Interaktywny Jupyter Notebook dla Google Colab
-└── README.md                          # Dokumentacja techniczna
+│   ├── 1_AOI_GBOV_CONDOM.geojson         # działki (winnice, sady, poligon stacji)
+│   ├── 1_AOI_GBOV_CONDOM_ZASIEG.geojson  # zasięg pobierania
+│   └── 7_isismn_data/                    # pomiary ISMN SMOSMANIA 2016–2024
+├── docs/                        # architektura, plany, analizy (evidence)
+└── legacy/                      # poprzednia wersja (AgriScreen v2.5): LST, ATPRK, TCARI/OSAVI, TVDI — nieużywana
 ```
 
----
+Numeracja kroków nie jest ciągła: kroki 2 i 6 z v2.5 są w `legacy/`.
 
-## Wymagania i Zależności
+## Uruchomienie
 
-W środowisku Google Colab instalacja pakietów odbywa się poleceniem:
+1. Otwórz `notebooks/AgriWatch_Monitor.ipynb` w Colab (Plik → Otwórz → GitHub), środowisko z GPU.
+2. `Uruchom wszystko`. Notatnik montuje Dysk, klonuje lub aktualizuje repozytorium w `MyDrive/GeoWorldLook/agriwatch`,
+   instaluje pakiety, inicjalizuje GEE (projekt `ee-geoworldlook`) i wykonuje zadania:
+   `ingest_s2 → ingest_era5 → scene_stats → anomalies → validate → bulletin`.
+3. Wyniki: `data/05_Final_Outputs/agriwatch/` (biuletyn, wykresy, `agriwatch_latest.json`) i tabele `data/registry/gwl_*.csv`.
+
+Testy offline (bez GEE i GPU; prawdziwe dane ISMN i działki, syntetyczne dane satelitarne):
+
 ```bash
-pip install -q earthengine-api geemap geedim rasterio geopandas scikit-image scikit-learn scipy affine mlstac sen2sr arosics pydms
+python step_05_colab_run.py --selftest
+python step_07_station_pipeline.py --selftest
 ```
 
----
+## Zależności
 
-## Specyfikacja Algorytmiczna
-
-### 1. Ingestia i Baza Historyczna GEE (`step_01_ingest.py`)
-- **Sentinel-2 L2A BOA:** Pasma `B02, B03, B04, B05, B06, B07, B08, B8A, B11, B12`.
-- **Maskowanie chmur i cieni:** Połączenie prawdopodobieństwa `COPERNICUS/S2_CLOUD_PROBABILITY` (< 15%), filtracji warstwy `SCL` oraz geometrycznej projekcji cieni na bazie kąta azymutu słońca.
-- **Skalowanie:** Rygorystyczny podział surowych wartości DN przez $10000.0$ do zakresu $[0.0, 1.0]$.
-- **Sentinel-3 SLSTR / Copernicus Thermal LST:** Dopasowanie czasowe $\pm 24\text{ h}$ względem S2.
-- **Copernicus DEM GLO-30:** Numeryczny model terenu 30 m resamplowany do siatki 10 m.
-- **Agregacja wieloletnia (2018–2025):** Pikselowa średnia i odchylenie standardowe wskaźników TCARI/OSAVI oraz NDVI/TVDI liczone bezpośrednio w silniku GEE.
-- **Przyrostowa synchronizacja (Incremental Sync):** Automatyczna detekcja istniejących scen w manifeście `ingest_manifest.json` – pobieranie tylko nowo opublikowanych zobrazowań.
-
-### 2. Korejestracja i Downscaling Termiczny (`step_02_align_and_scale.py`)
-- **AROSICS:** Subpikselowa korekta przesunięć geometrycznych LST względem kanału referencyjnego B08 (10 m) metodą korelacji fazowej.
-- **Poprawka adiabatyczna (Lapse Rate):**
-  $$\text{LST}_{\text{norm}} = \text{LST}_{\text{raw}} + 0.006 \cdot \text{DEM}$$
-- **Deagregacja pyDMS:** Bagging drzew decyzyjnych (`BaggingRegressor` z `DecisionTreeRegressor`) z cechami przewodzącymi NDVI 10 m i DEM 10 m.
-- **Konserwacja energii (Gaussian Residual Compensation):** Rozproszenie reszt filtrem Gaussa dla zachowania bilansu radiometrycznego.
-- **Przywrócenie temperatury:**
-  $$\text{LST}_{10\text{m}} = \text{LST}_{\text{norm\_10m}} - 0.006 \cdot \text{DEM}_{10\text{m}}$$
-
-### 3. Super-Rozdzielczość SEN2SR i Fuzja ATPRK (`step_03_super_resolve.py`)
-- **SEN2SR (Deep Learning):** Model `NonReference_RGBN_x4` (`tacofoundation/sen2sr`) podnoszący pasma 10 m do 2.5 m/px. Zarządzanie VRAM: `torch.cuda.empty_cache()` i przetwarzanie kafelkowe.
-- **ATPRK (Area-To-Point Regression Kriging):**
-  - Pasma 20 m (`B05, B06, B07, B8A, B11, B12`) oraz `LST_10m` fuzjowane do siatki 2.5 m.
-  - Regresja wielozmienna + dyspersja reszt z uwzględnieniem PSF (Point Spread Function) sensora.
-  - Bezwzględna konserwacja energii radiometrycznej (uśrednienie blokowe 2.5 m równe wartości wyjściowego piksela coarse).
-- **Profil Affine:** Nowy rozmiar piksela $2.5\text{ m} \times 2.5\text{ m}$.
-
-### 4. Wskaźniki, Detekcja Anomalii i Walidacja (`step_04_metrics_alert.py`)
-- **OSAVI (2.5 m):**
-  $$\text{OSAVI} = \frac{\text{B08} - \text{B04}}{\text{B08} + \text{B04} + 0.16}$$
-- **TCARI (2.5 m):**
-  $$\text{TCARI} = 3 \cdot \left[ (\text{B05} - \text{B04}) - 0.2 \cdot (\text{B05} - \text{B03}) \cdot \frac{\text{B05}}{\text{B04} + 1e-6} \right]$$
-- **Ratio (2.5 m):** $\text{TCARI} / (\text{OSAVI} + 1e-6)$.
-- **TVDI (10 m):** Przestrzeń trójkąta LST-NDVI (100 przedziałów), odporne dopasowanie krawędzi suchej i wilgotnej.
-- **Silnik Z-score i Alerty (2.5 m):**
-  $$Z = \frac{V_{\text{current}} - \mu_{\text{history}}}{\sigma_{\text{history}} + 1e-6}$$
-  - `0`: Norma ($Z \le 1.5$)
-  - `1`: Alert Żółty ($1.5 < Z \le 2.0$) – podwyższony stres ewapotranspiracyjny / umiarkowana chloroza
-  - `2`: Alert Czerwony ($Z > 2.0$) – silny deficyt wody / ostra chloroza
-- **Protokół Walda:** Degradacja Gaussa ($\sigma=1.5$, decymacja $\times 4$), super-rozdzielcza rekonstrukcja i metryki RMSE, SAM (stopnie), SSIM.
-
-### 5. Orkiestracja i Produkty Końcowe (`step_05_colab_run.py`)
-- Zapis w standardzie **Cloud-Optimized GeoTIFF (COG)** z kompresją LZW i kafelkowaniem $256 \times 256$:
-  - `LST_10m_sharpened.tif`
-  - `TCARI_OSAVI_2.5m.tif`
-  - `TVDI_10m.tif`
-  - `Alert_Matrix_2.5m.tif`
-- Automatyczne wygenerowanie raportu Markdown [`validation_report.md`](file:///c:/Users/dawids/OneDrive%20-%20opegieka.pl/Pulpit/OneDrive%20-%20opegieka.pl/Pulpit/DAWID/GEOWORLDLOOK/2_geoworldlook/data/05_Final_Outputs/validation_report.md).
-
----
-
-## Uruchomienie w Google Colab
-
-1. Umieść folder projektu w środowisku Colab lub na Dysku Google.
-2. Otwórz notatnik [`notebooks/AgriScreen_Colab_Pipeline.ipynb`](file:///c:/Users/dawids/OneDrive%20-%20opegieka.pl/Pulpit/OneDrive%20-%20opegieka.pl/Pulpit/DAWID/GEOWORLDLOOK/2_geoworldlook/notebooks/AgriScreen_Colab_Pipeline.ipynb).
-3. Wybierz środowisko wykonawcze z akceleratorem **GPU (T4)**.
-4. Uruchamiaj komórki sekwencyjnie.
+`earthengine-api geemap geedim rasterio geopandas numpy pandas scipy matplotlib pytesmo ismn`;
+dla super-resolution dodatkowo `sen2sr mlstac torch` (opcjonalne — bez nich monitoring działa na 10 m).

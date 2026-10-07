@@ -209,7 +209,7 @@ def run_pipeline(config: Dict[str, Any] = CONFIG) -> None:
     """
     Główna funkcja uruchomieniowa wykonująca sekwencyjnie wszystkie kroki potoku DSS.
     """
-    from step_01_ingest import ingest_satellite_data
+    from step_01_ingest_v1 import ingest_satellite_data
     from step_02_align_and_scale import align_and_scale_lst
     from step_03_super_resolve import super_resolve_bands, export_rgb_geotiffs
     from step_04_metrics_alert import compute_metrics_and_alerts

@@ -13,7 +13,7 @@ Architektura: kod na GitHub -> obliczenia w Colab -> Dysk Google jako baza danyc
         task_validate        błąd anomalii na profilu ISMN Condom (step_07)
         task_bulletin        raport, wykresy i JSON dla geoworldlook.vercel.app (step_04)
 
-Plan i uzasadnienie: docs/plans/Plan_v6_monitoring_anomalii_winnicy.md, docs/evidence/F2_przeglad_literatury.md.
+Architektura i uzasadnienie: docs/ARCHITEKTURA.md (literatura: docs/plans/Plan_v3_monitoring_winnic_SR.md, część A).
 Poprzednia wersja (potok AgriScreen v2.5): legacy/step_05_colab_run_v1.py.
 ================================================================================
 """
@@ -37,7 +37,7 @@ logger = logging.getLogger("AgriWatch_Run")
 # I. STEROWANIE Z NOTATNIKA I REJESTR NA DYSKU GOOGLE
 # ==============================================================================
 # Rejestr = pliki CSV w data/registry/ (w Colab: na Dysku Google). Nazwy tabel i kolumn
-# są nazwami w przyszłej bazie danych, "keys" to klucz główny. Plan: docs/plans/Plan_v6_monitoring_anomalii_winnicy.md.
+# są nazwami w przyszłej bazie danych, "keys" to klucz główny. Opis: docs/ARCHITEKTURA.md.
 #
 # Użycie w notatniku:
 #     rt = setup_runtime(PROJECT_DIR)
@@ -227,8 +227,8 @@ def registry_upsert(rt: Dict[str, Any], table: str, df: pd.DataFrame) -> Dict[st
     value_cols = [c for c in cols if c not in keys and c not in _META_COLUMNS]
     changed_keys = set()
     if in_old.any():
-        a = new_c[in_old.values].set_index(new_key[in_old].values)[value_cols]
-        b = old_c.set_index(old_key.values)[value_cols].loc[a.index]
+        a = new_c[in_old.values].set_index(new_key[in_old].to_numpy())[value_cols]
+        b = old_c.set_index(old_key.to_numpy())[value_cols].loc[a.index]
         changed_keys = set(a.index[(a != b).any(axis=1).values])
 
     write_mask = (~in_old.values) | new_key.isin(changed_keys).values

@@ -1,6 +1,6 @@
 """
 ================================================================================
-S-3/S-2 AgriScreen DSS - KROK 7: PIPELINE STACYJNY (JEDNA STACJA, END-TO-END)
+AgriWatch - KROK 7: PIPELINE STACYJNY (JEDNA STACJA, END-TO-END)
 ================================================================================
 Samodzielny potok dla jednej stacji ISMN (domyślnie SMOSMANIA / Condom):
 
@@ -48,7 +48,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-logger = logging.getLogger("AgriScreen_StationPipeline")
+logger = logging.getLogger("AgriWatch_Station")
 
 PIPELINE_VERSION = "0.2.0"
 
