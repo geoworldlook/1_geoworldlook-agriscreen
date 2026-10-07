@@ -35,6 +35,7 @@ logger = logging.getLogger("AgriWatch_SR")
 SEN2SR_BANDS = ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "B12"]
 SEN2SR_MODEL_URL = "https://huggingface.co/tacofoundation/sen2sr/resolve/main/SEN2SRLite/main/mlm.json"
 SR_FACTOR = 4
+MODEL_TILE = 128          # sen2sr.predict_large tnie obraz na kafelki 128x128 px
 
 
 # ==============================================================================
@@ -73,16 +74,22 @@ def super_resolve(arr10: np.ndarray, model: Any, device: Any, overlap: int = 32)
     if arr10.shape[0] != len(SEN2SR_BANDS):
         raise ValueError(f"Oczekiwano {len(SEN2SR_BANDS)} pasm, otrzymano {arr10.shape[0]}")
     nan_mask = ~np.isfinite(arr10).all(axis=0)
-    x = torch.from_numpy(np.nan_to_num(arr10, nan=0.0, posinf=0.0, neginf=0.0).astype("float32")).to(device)
+    c, h, w = arr10.shape
+    x = np.nan_to_num(arr10, nan=0.0, posinf=0.0, neginf=0.0).astype("float32")
+    # Model pracuje zawsze na kafelkach 128x128; predict_large nie dopełnia osi < 128 px
+    # (np. AOI 120 px szerokości -> błąd w hard_constraint). Dopełniamy odbiciem i przycinamy wynik.
+    ph, pw = max(MODEL_TILE - h, 0), max(MODEL_TILE - w, 0)
+    if ph or pw:
+        x = np.pad(x, ((0, 0), (0, ph), (0, pw)), mode="reflect" if min(h, w) > 1 else "edge")
+    x = torch.from_numpy(x).to(device)
     with torch.no_grad():
         y = sen2sr.predict_large(model=model, X=x, overlap=overlap)
-    out = y.detach().float().cpu().numpy()
+    out = y.detach().float().cpu().numpy()[:, : h * SR_FACTOR, : w * SR_FACTOR]
     del x, y
     if hasattr(torch, "cuda") and torch.cuda.is_available():
         torch.cuda.empty_cache()
     gc.collect()
 
-    c, h, w = arr10.shape
     if out.shape != (c, h * SR_FACTOR, w * SR_FACTOR):
         raise RuntimeError(f"SEN2SR: nieoczekiwany kształt wyjścia {out.shape}, oczekiwano {(c, h * 4, w * 4)}")
     out[:, np.repeat(np.repeat(nan_mask, SR_FACTOR, 0), SR_FACTOR, 1)] = np.nan
