@@ -62,9 +62,10 @@ Zależności między modułami: `step_05` importuje `step_01/03/04/07` leniwie (
   pasma 10 m (B02, B03, B04, B08) w blokach 4×4, próg stały 0,01; pasma 20 m (B05–B07, B8A, B11, B12) w blokach 8×8
   względem pikseli 20 m (przesunięcie siatki wykrywane z powielonych pikseli), próg = specyfikacja dokładności L2A
   `SR_20M_SPEC_FACTOR · (0,05·ρ + 0,005)` (Vermote 2008), ρ = średnia reflektancja pasma w scenie.
-  **Decyzja per wskaźnik** (`step_03.INDEX_BANDS`): NDVI (B04, B08), NDMI (B8A, B11), NDRE (B8A, B05) z 2,5 m tylko,
+  **Decyzja per wskaźnik** (`step_03.INDEX_BANDS`): NDVI (B04, B08), NDMI (B8A, B11), NDRE (B8A, B05),
+  CRSWIR (B8A, B11, B12) z 2,5 m tylko,
   gdy przeszły wszystkie ich pasma. Szacowany błąd wskaźnika z SR (`{idx}_sr_err`) zapisywany w `SR_QC` dla każdej sceny.
-  Brak modelu = błąd zgłoszony, bez zastępstwa interpolacją. Wersja kontroli: `SR_QC_VERSION = "qc3"`.
+  Brak modelu = błąd zgłoszony, bez zastępstwa interpolacją. Wersja kontroli: `SR_QC_VERSION = "qc4"`, `SR_20M_SPEC_FACTOR = 1,5`.
 - **Ryzyko przyjęte świadomie (2026-10-07):** pasma 20 m po SR mają błąd spójności 4–9% reflektancji (B8A ~0,019,
   B11 ~0,015, B05 ~0,008 na scenach z 2019), czyli 10–20 razy więcej niż pasma 10 m. Próg L2A dopuszcza błąd równy
   niepewności samych danych wejściowych. Skutek: NDMI i NDRE z 2,5 m mają błąd ~0,03–0,04 na piksel (propagacja z RMSE
@@ -72,6 +73,10 @@ Zależności między modułami: `step_05` importuje `step_01/03/04/07` leniwie (
   NDMI/NDRE z 2,5 m są na karcie i w walidacji (segment `anomaly_clim_paired`), **nie** w logice statusu, dopóki test
   paired nie pokaże, że nie są gorsze od 10/20 m. B12 nie spełnia specyfikacji, więc wskaźniki z B12 (NMDI, CRSWIR)
   liczymy z pasm natywnych.
+- **Poluzowanie do k = 1,5 (2026-10-07, na potrzeby testów CRSWIR):** przepuszcza B12 (błąd 0,014 przy progu 0,020).
+  Szacowany błąd na piksel na scenach z 2019: NDVI 0,004, NDMI 0,04, NDRE 0,035, **CRSWIR 0,08** (~7% wartości ~1,15).
+  CRSWIR z 2,5 m i z 10/20 m liczone równolegle (`S2SR_2.5m` i `S2_10m`), porównanie w `anomaly_clim_paired`.
+  Wyższe CRSWIR = mniej wody, więc korelacja z wilgotnością gleby ma być ujemna.
 
 ## 5. Rejestr `gwl_*` (Dysk Google, `data/registry/`)
 

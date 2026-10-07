@@ -34,7 +34,9 @@ logger = logging.getLogger("AgriWatch_Metrics")
 
 S2_BANDS = ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "B12"]
 RASTER_CLOUD_BAND = 10          # indeks pasma 'cloudmask' w plikach z step_01 (1 = chmura/cień)
-INDICES = ("ndvi", "ndmi", "ndre")
+INDICES = ("ndvi", "ndmi", "ndre", "crswir")
+# CRSWIR: środki pasm [nm] jak w FORDEAD (INRAE); waga kontinuum dla B11 między B8A a B12
+CRSWIR_W = (1610.0 - 865.0) / (2190.0 - 865.0)
 
 CDI_CLASSES = {0: "normal", 1: "watch", 2: "warning", 3: "alert"}
 ACTION = {"normal": "normal", "recovery": "normal", "watch": "watch", "warning": "watch", "alert": "inspect"}
@@ -48,7 +50,9 @@ def compute_indices(arr: np.ndarray) -> Dict[str, np.ndarray]:
     """
     NDVI = (B08-B04)/(B08+B04)        — wigor / pokrycie roślinnością,
     NDMI = (B8A-B11)/(B8A+B11)        — woda w liściach (SWIR; Laroche-Pinel i in. 2021: B8A, B12 istotne),
-    NDRE = (B8A-B05)/(B8A+B05)        — red-edge (chlorofil).
+    NDRE = (B8A-B05)/(B8A+B05)        — red-edge (chlorofil),
+    CRSWIR = B11 / (B8A + (B12-B8A)·w) — głębokość absorpcji wody przy 1610 nm względem kontinuum B8A–B12
+                                         (FORDEAD, INRAE); wyższa wartość = mniej wody. Przegląd: F3, sekcja 7.
     """
     b = {name: arr[i] for i, name in enumerate(S2_BANDS)}
     with np.errstate(all="ignore"):
@@ -56,6 +60,7 @@ def compute_indices(arr: np.ndarray) -> Dict[str, np.ndarray]:
             "ndvi": (b["B08"] - b["B04"]) / (b["B08"] + b["B04"]),
             "ndmi": (b["B8A"] - b["B11"]) / (b["B8A"] + b["B11"]),
             "ndre": (b["B8A"] - b["B05"]) / (b["B8A"] + b["B05"]),
+            "crswir": b["B11"] / (b["B8A"] + (b["B12"] - b["B8A"]) * CRSWIR_W),
         }
 
 

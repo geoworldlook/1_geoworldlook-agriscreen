@@ -43,11 +43,18 @@ SR_FACTOR = 4
 MODEL_TILE = 128          # sen2sr.predict_large tnie obraz na kafelki 128x128 px (i wymaga kwadratu)
 # Wersja kontroli H-SR0/H-SR1 zapisywana w rejestrze (calib_id wierszy SR_QC). Zmiana wersji = sceny
 # ocenione starszą kontrolą są przeliczane jeden raz; sceny odrzucone bieżącą wersją nie są powtarzane.
-SR_QC_VERSION = "qc3"     # qc2: natywna rozdzielczość pasma; qc3: pasma 20 m wg specyfikacji L2A, decyzja per wskaźnik
+SR_QC_VERSION = "qc4"     # qc2: natywna rozdzielczość; qc3: pasma 20 m wg specyfikacji L2A, per wskaźnik; qc4: + CRSWIR, k = 1,5
 BANDS_10M = ("B02", "B03", "B04", "B08")
 BANDS_20M = ("B05", "B06", "B07", "B8A", "B11", "B12")
 # Pasma wskaźników liczonych z SR (step_04.compute_indices). Wskaźnik z 2,5 m tylko, gdy wszystkie jego pasma przeszły.
-INDEX_BANDS = {"ndvi": ("B04", "B08"), "ndmi": ("B8A", "B11"), "ndre": ("B8A", "B05")}
+INDEX_BANDS = {"ndvi": ("B04", "B08"), "ndmi": ("B8A", "B11"), "ndre": ("B8A", "B05"), "crswir": ("B8A", "B11", "B12")}
+_W = (1610.0 - 865.0) / (2190.0 - 865.0)
+_INDEX_FN = {
+    "ndvi": lambda r, n: (n - r) / (n + r),
+    "ndmi": lambda a, b: (a - b) / (a + b),
+    "ndre": lambda a, b: (a - b) / (a + b),
+    "crswir": lambda a8, b11, b12: b11 / (a8 + (b12 - a8) * _W),
+}
 # Specyfikacja dokładności odbicia powierzchniowego L2A: 0,05·ρ + 0,005 (Vermote i in. 2008; używana w walidacji
 # korekcji atmosferycznej Sentinel-2, ACIX). Zasada dla pasm 20 m: SR nie dodaje więcej błędu, niż wynosi
 # niepewność samych danych wejściowych (× SR_20M_SPEC_FACTOR). Ryzyko przyjęte świadomie (docs/ARCHITEKTURA.md).
@@ -234,20 +241,32 @@ def sr_checks(arr10: np.ndarray, arr25: np.ndarray, cfg: Dict[str, Any]) -> Dict
             out[f"consistency_rmse_{b}"] <= out[f"consistency_limit_{b}"] for b in checked)
         out[f"sr_ok{suffix}"] = out[f"pass_hsr0{suffix}"] and out[f"pass_hsr1{suffix}"]
     out["sr_ok_indices"] = [idx for idx, bs in INDEX_BANDS.items() if all(band_ok.get(b, False) for b in bs)]
-    for idx, (a, b) in INDEX_BANDS.items():
-        out[f"{idx}_sr_err"] = _index_error(out, a, b)
+    for idx in INDEX_BANDS:
+        out[f"{idx}_sr_err"] = _index_error(out, idx)
     return out
 
 
-def _index_error(chk: Dict[str, Any], a: str, b: str) -> float:
-    """Błąd wskaźnika (A−B)/(A+B) z RMSE pasm (propagacja liniowa, błędy pasm niezależne), przy średnich ρ scen."""
+def _index_error(chk: Dict[str, Any], idx: str) -> float:
+    """
+    Błąd wskaźnika z RMSE jego pasm: propagacja liniowa (gradient numeryczny w średnich reflektancjach sceny),
+    błędy pasm traktowane jako niezależne. Zwraca odchylenie standardowe błędu wskaźnika na piksel.
+    """
+    bands = INDEX_BANDS[idx]
     try:
-        ra, rb = chk[f"mean_reflectance_{a}"], chk[f"mean_reflectance_{b}"]
-        ea, eb = chk[f"consistency_rmse_{a}"], chk[f"consistency_rmse_{b}"]
+        rho = np.array([chk[f"mean_reflectance_{b}"] for b in bands], float)
+        err = np.array([chk[f"consistency_rmse_{b}"] for b in bands], float)
     except KeyError:
         return float("nan")
-    s = ra + rb
-    return float(2.0 * np.hypot(rb * ea, ra * eb) / (s * s)) if s > 0 else float("nan")
+    f = _INDEX_FN[idx]
+    grad = []
+    for k in range(len(bands)):
+        h = 1e-5
+        up, dn = rho.copy(), rho.copy()
+        up[k] += h
+        dn[k] -= h
+        grad.append((f(*up) - f(*dn)) / (2 * h))
+    v = float(np.sqrt(np.sum((np.array(grad) * err) ** 2)))
+    return v if np.isfinite(v) else float("nan")
 
 
 # ==============================================================================

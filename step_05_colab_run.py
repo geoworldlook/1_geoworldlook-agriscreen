@@ -377,8 +377,9 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "SR_MAX_SCENES_PER_RUN": 150,         # limit na uruchomienie (sesja Colab); None = wszystkie. Od najnowszych
     "SR_MIN_DETAIL_RATIO": 0.02,          # H-SR0: v1 (interpolacja) = 0,005
     "SR_MAX_CONSISTENCY_RMSE": 0.01,      # H-SR1 pasm 10 m (NDVI, rdzeń detekcji): stały, surowy próg reflektancji
-    "SR_20M_SPEC_FACTOR": 1.0,            # H-SR1 pasm 20 m: RMSE ≤ k·(0,05·ρ + 0,005), specyfikacja L2A (Vermote 2008);
-                                          # ryzyko przyjęte świadomie: błąd NDMI/NDRE z 2,5 m ~0,03–0,04 na piksel
+    "SR_20M_SPEC_FACTOR": 1.5,            # H-SR1 pasm 20 m: RMSE ≤ k·(0,05·ρ + 0,005), specyfikacja L2A (Vermote 2008);
+                                          # k = 1,5 (decyzja 2026-10-07): przepuszcza B12 -> CRSWIR z 2,5 m do testów.
+                                          # Ryzyko przyjęte świadomie: NDMI/NDRE ~0,03–0,04, CRSWIR ~0,05 na piksel
     "SR_DIR": "data/03_SR_2.5m",
     "SHOWCASE_MONTHS": ["2022-07", "2022-08"],
     "SHOWCASE_SEASON": 2022,
@@ -458,7 +459,7 @@ def _sites_rows(sites, cfg: Dict[str, Any]) -> pd.DataFrame:
 
 
 def _stats_to_obs(recs: List[Dict[str, Any]], run_tag: str,
-                  variables: tuple = ("ndvi", "ndmi", "ndre", "clear_frac")) -> pd.DataFrame:
+                  variables: tuple = ("ndvi", "ndmi", "ndre", "crswir", "clear_frac")) -> pd.DataFrame:
     rows = []
     for r in recs:
         for var in variables:
@@ -526,7 +527,7 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
     buf: List[Dict[str, Any]] = []
     buf_sr: Dict[tuple, List[Dict[str, Any]]] = {}     # zmienne SR przyjęte przez kontrolę -> rekordy
     qc: List[Dict[str, Any]] = []
-    n10 = nsr = nsr_ok = nsr_ok20 = 0
+    n10 = nsr = nsr_ok = nsr_ok20 = nsr_cr = 0
     showcase = set(cfg["SHOWCASE_MONTHS"])
 
     def flush():
@@ -584,6 +585,7 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
                     # Każdy wskaźnik z 2,5 m tylko wtedy, gdy wszystkie jego pasma przeszły kontrolę (INDEX_BANDS)
                     nsr_ok += int("ndvi" in idx_ok)
                     nsr_ok20 += int("ndmi" in idx_ok)
+                    nsr_cr += int("crswir" in idx_ok)
                     variables = tuple(idx_ok) + ("clear_frac",)
                     p25 = s3.profile_25m(prof)
                     c25 = np.repeat(np.repeat(cloud, 4, 0), 4, 1)
@@ -606,7 +608,7 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
             flush()
     flush()
     msg = (f"10 m: {n10} nowych scen; SR: {nsr} scen, NDVI 2,5 m przyjęte w {nsr_ok}, "
-           f"NDMI 2,5 m w {nsr_ok20} (próg 20 m: specyfikacja L2A × {cfg.get('SR_20M_SPEC_FACTOR', 1.0)})")
+           f"NDMI 2,5 m w {nsr_ok20}, CRSWIR 2,5 m w {nsr_cr} (próg 20 m: specyfikacja L2A × {cfg.get('SR_20M_SPEC_FACTOR', 1.0)})")
     if nsr:
         msg += f"; SR {state['sr_seconds'] / nsr:.1f} s/scenę na {state['dev']}"
     cov = sr_coverage(rt, cfg)
@@ -633,7 +635,7 @@ def _veg_anomalies(rt: Dict[str, Any], cfg: Dict[str, Any]) -> pd.DataFrame:
     w = w[w["time"].dt.month.between(m0, m1)]
     parts = []
     for (site, prod), g in w.groupby(["site_id", "product"]):
-        for idx in ("ndvi", "ndmi"):
+        for idx in ("ndvi", "ndmi", "crswir"):
             if idx not in g or g[idx].isna().all():      # np. NDMI z SR, gdy pasma 20 m nie przeszły kontroli
                 continue
             a = s4.scene_anomaly(g, idx, cfg)
@@ -824,6 +826,7 @@ def _selftest(out_dir: str) -> None:
     chk20b = s3.sr_checks(lo20, sr20b, cfg)
     assert set(chk20b["sr_ok_indices"]) == {"ndvi", "ndmi", "ndre"} and not chk20b["sr_ok_20m"], chk20b
     assert 0 < chk20b["ndre_sr_err"] < 0.1, chk20b["ndre_sr_err"]
+    assert "crswir" in s3.sr_checks(lo20, sr20, cfg)["sr_ok_indices"], "CRSWIR z 2,5 m przy spójnych B8A, B11, B12"
     print("[OK] Kontrola SR: interpolacja odrzucona, spójny SR przyjęty (pasma 10 m i 20 m w natywnej rozdzielczości).")
 
     # Atrapa SEN2SR (bez GPU i pobierania modelu): powielenie pikseli 4x4 + szczegół o zerowej średniej w bloku,
