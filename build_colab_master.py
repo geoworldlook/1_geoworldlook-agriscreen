@@ -44,7 +44,7 @@ print('Projekt:', PROJECT_DIR)"""),
     ("md", "## 2. Środowisko: pakiety, GEE, rejestr, konfiguracja"),
     ("code", """from step_05_colab_run import (setup_runtime, monitor_config, run_task, run_history, registry_summary,
                                task_ingest_s2, task_ingest_era5, task_scene_stats, task_anomalies,
-                               task_validate, task_bulletin, task_dashboard)
+                               task_validate, task_bulletin, task_dashboard, task_summary)
 from step_06_dashboard import show_dashboard
 rt = setup_runtime(PROJECT_DIR, gee_project='ee-geoworldlook', pull=False)
 cfg = monitor_config(rt)   # zmiany: monitor_config(rt, {'VINEYARDS': {'VINEYARD_06': 6, 'VINEYARD_07': 7}})"""),
@@ -61,8 +61,17 @@ run_task(rt, 'bulletin', task_bulletin, rt, cfg)"""),
 Mapa NDVI na zdjęciu satelitarnym (wybór daty), status, ryzyko suszy, przyczyny, pogoda i prognoza, wiarygodność.
 Plik: `data/05_Final_Outputs/agriwatch/dashboard.html` (można otworzyć w przeglądarce z Dysku)."""),
     ("code", """run_task(rt, 'dashboard', task_dashboard, rt, cfg)
-show_dashboard(os.path.join(cfg['OUTPUT_DIR'], 'dashboard.html'))"""),
-    ("md", "## 7. Rejestr i historia uruchomień"),
+p = os.path.join(cfg['OUTPUT_DIR'], 'dashboard.html')
+if os.path.exists(p):
+    show_dashboard(p)
+else:
+    print('Dashboard nie powstał — sprawdź komunikat zadania powyżej.')"""),
+    ("md", """## 7. Raport z uruchomienia (do analizy)
+`run_summary.md` — wersje, konfiguracja, pokrycie danych, kontrola SR, status per rok, walidacja, błędy.
+**Po każdym większym uruchomieniu prześlij ten plik** (albo wklej jego treść) — na nim opieramy wnioski."""),
+    ("code", """run_task(rt, 'summary', task_summary, rt, cfg)
+print(open(os.path.join(cfg['OUTPUT_DIR'], 'run_summary.md'), encoding='utf-8').read())"""),
+    ("md", "## 8. Rejestr i historia uruchomień"),
     ("code", """display(registry_summary(rt))
 display(run_history(rt, n=10))"""),
 ]

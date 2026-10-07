@@ -44,9 +44,10 @@ Numeracja kroków nie jest ciągła: kroki 2 i 6 z v2.5 są w `legacy/`.
 1. Otwórz `notebooks/AgriWatch_Monitor.ipynb` w Colab (Plik → Otwórz → GitHub), środowisko z GPU.
 2. `Uruchom wszystko`. Notatnik montuje Dysk, klonuje lub aktualizuje repozytorium w `MyDrive/GeoWorldLook/agriwatch`,
    instaluje pakiety, inicjalizuje GEE (projekt `ee-geoworldlook`) i wykonuje zadania:
-   `ingest_s2 → ingest_era5 → scene_stats → anomalies → validate → bulletin → dashboard`.
+   `ingest_s2 → ingest_era5 → scene_stats → anomalies → validate → bulletin → dashboard → summary`.
 3. Wyniki: `data/05_Final_Outputs/agriwatch/` (**`dashboard.html`**, biuletyn, wykresy, `agriwatch_latest.json`)
    i tabele `data/registry/gwl_*.csv`. Dashboard wyświetla się w notatniku (sekcja 6).
+4. Po uruchomieniu prześlij `run_summary.md` (sekcja 7 notatnika): wersje, konfiguracja, kontrola SR, status, walidacja, błędy.
 
 ## Zakres wersji 1.0 (zamrożony 2026-10-07)
 

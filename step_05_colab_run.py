@@ -749,6 +749,113 @@ def task_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tru
     return {"message": os.path.relpath(path, cfg["PROJECT_DIR"])}
 
 
+def task_summary(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Raport z uruchomienia do analizy po fakcie: run_summary.md (do wklejenia) i run_summary.json w OUTPUT_DIR.
+    Zawiera wersje (commit, pakiety, GPU), konfigurację, pokrycie danych, statystyki kontroli SR, status per rok,
+    walidację i ostatnie uruchomienia z błędami. Bez danych surowych (kilka kB).
+    """
+    import importlib.metadata as md
+    import step_03_super_resolve as s3
+
+    def ver(pkg):
+        try:
+            return md.version(pkg)
+        except Exception:
+            return None
+
+    try:
+        import torch
+        gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
+    except Exception:
+        gpu = "brak torch"
+    out = cfg["OUTPUT_DIR"]
+    obs = registry_read(rt, "gwl_observations")
+    scenes = sorted(glob.glob(os.path.join(cfg["S2_DIR"], "S2_L2A_*.tif")))
+    era5_path = _era5_csv(cfg)
+    era5_last = str(pd.read_csv(era5_path, usecols=["time"])["time"].max())[:10] if os.path.exists(era5_path) else None
+
+    qc = obs[(obs["product"] == "SR_QC") & (obs["calib_id"].astype(str) == f"SEN2SRLite_main_{s3.SR_QC_VERSION}")]
+    qcw = qc.pivot_table(index="time_utc", columns="variable", values="value") if len(qc) else pd.DataFrame()
+    sr = {"qc_version": s3.SR_QC_VERSION, "scenes_checked": int(len(qcw)), **sr_coverage(rt, cfg)}
+    for col in qcw.columns:
+        v = pd.to_numeric(qcw[col], errors="coerce").dropna()
+        if len(v):
+            sr[col] = ({"accept_rate": round(float(v.mean()), 3)} if col.startswith("sr_ok")
+                       else {"median": round(float(v.median()), 4), "p90": round(float(v.quantile(0.9)), 4)})
+
+    st_path = os.path.join(out, "status_dekads.csv")
+    status, per_year, current = {}, {}, None
+    if os.path.exists(st_path):
+        st = pd.read_csv(st_path)
+        st = st[st["site_id"] == cfg["MAIN_SITE"]]
+        if len(st):
+            current = st.sort_values("date").iloc[-1][["date", "cdi_class", "confidence", "reason_codes"]].to_dict()
+            st["year"] = st["date"].str[:4]
+            per_year = st.pivot_table(index="year", columns="cdi_class", values="date", aggfunc="count",
+                                      fill_value=0).astype(int)
+            status = per_year.to_dict(orient="index")
+    vpath = os.path.join(out, "validation_anomalies.csv")
+    val = pd.read_csv(vpath) if os.path.exists(vpath) else pd.DataFrame()
+    runs = run_history(rt, n=15)
+
+    summary = {
+        "generated_utc": _utc_now(), "git_commit": rt.get("GIT_COMMIT", ""), "device": gpu,
+        "versions": {p: ver(p) for p in ("numpy", "pandas", "rasterio", "geopandas", "earthengine-api", "torch",
+                                         "sen2sr", "mlstac", "scipy")},
+        "config": {k: cfg[k] for k in ("MAIN_SITE", "VEG_PRODUCT", "VEG_INDEX", "S2_MONTHS", "S2_CLOUD_MAX_AOI",
+                                       "THR_SPI1", "THR_SPI3", "THR_SMA", "THR_VEG", "SR_MAX_CONSISTENCY_RMSE",
+                                       "SR_20M_SPEC_FACTOR", "SR_MIN_DETAIL_RATIO", "SR_MAX_SCENES_PER_RUN")},
+        "data": {"s2_scenes": len(scenes),
+                 "s2_first": os.path.basename(scenes[0])[7:15] if scenes else None,
+                 "s2_last": os.path.basename(scenes[-1])[7:15] if scenes else None, "era5_last_day": era5_last},
+        "sr": sr, "status_current": current, "status_per_year": status,
+        "validation": val.round(3).to_dict(orient="records") if len(val) else [],
+        "runs": runs.to_dict(orient="records"),
+    }
+    js = os.path.join(out, "run_summary.json")
+    with open(js, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=1, ensure_ascii=False, default=str)
+
+    def table(df):
+        if not len(df):
+            return "(brak)"
+        cols = [str(c) for c in df.columns]
+        rows = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+        rows += ["| " + " | ".join("" if pd.isna(v) else str(v) for v in r) + " |" for r in df.itertuples(index=False)]
+        return "\n".join(rows)
+    srt = pd.DataFrame([{"zmienna": k, **(v if isinstance(v, dict) else {"wartość": v})} for k, v in sr.items()])
+    md_txt = f"""# AgriWatch — raport z uruchomienia {summary['generated_utc']}
+
+Commit `{summary['git_commit']}` · urządzenie: {gpu} · sen2sr {summary['versions']['sen2sr']} · torch {summary['versions']['torch']}
+
+## Dane
+{json.dumps(summary['data'], ensure_ascii=False)}
+
+## Konfiguracja
+{json.dumps(summary['config'], ensure_ascii=False, default=str)}
+
+## Super-resolution (kontrola {s3.SR_QC_VERSION})
+{table(srt)}
+
+## Status bieżący
+{json.dumps(current, ensure_ascii=False, default=str)}
+
+## Status: liczba dekad w klasach per rok
+{table(per_year.reset_index()) if len(status) else "(brak)"}
+
+## Walidacja
+{table(val.round(3)) if len(val) else "(brak)"}
+
+## Ostatnie uruchomienia
+{table(runs)}
+"""
+    mdp = os.path.join(out, "run_summary.md")
+    with open(mdp, "w", encoding="utf-8") as f:
+        f.write(md_txt)
+    return {"message": f"{os.path.relpath(mdp, cfg['PROJECT_DIR'])} ({len(md_txt) // 1024} kB)"}
+
+
 def run_monitoring(rt: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None, ingest: bool = True) -> None:
     """Wszystkie zadania po kolei (każde zapisane w gwl_runs; błąd jednego nie zatrzymuje kolejnych)."""
     cfg = cfg or monitor_config(rt)
@@ -760,6 +867,7 @@ def run_monitoring(rt: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None, ing
     run_task(rt, "validate", task_validate, rt, cfg)
     run_task(rt, "bulletin", task_bulletin, rt, cfg)
     run_task(rt, "dashboard", task_dashboard, rt, cfg)
+    run_task(rt, "summary", task_summary, rt, cfg)
 
 
 # ==============================================================================
@@ -871,7 +979,8 @@ def _selftest(out_dir: str) -> None:
     try:
         for name, fn in (("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
                          ("validate", task_validate), ("bulletin", task_bulletin),
-                         ("dashboard", lambda r, c: task_dashboard(r, c, forecast=False))):
+                         ("dashboard", lambda r, c: task_dashboard(r, c, forecast=False)),
+                         ("summary", task_summary)):
             run_task(rt, name, fn, rt, cfg, raise_errors=True)
         res = run_task(rt, "scene_stats_repeat", task_scene_stats, rt, cfg, raise_errors=True)
     finally:
@@ -895,6 +1004,9 @@ def _selftest(out_dir: str) -> None:
     n_layers = dash.count('"png": "')
     assert "Ryzyko suszy" in dash and "L.imageOverlay" in dash and n_layers >= 5, n_layers
     print(f"[OK] Dashboard: {n_layers} dat mapy NDVI, {len(dash) // 1024} kB")
+    summ = json.load(open(os.path.join(cfg["OUTPUT_DIR"], "run_summary.json"), encoding="utf-8"))
+    assert summ["sr"]["scenes_checked"] == 126 and summ["status_current"] and summ["validation"], summ["sr"]
+    print(f"[OK] Raport z uruchomienia: {len(open(os.path.join(cfg['OUTPUT_DIR'], 'run_summary.md'), encoding='utf-8').read()) // 1024} kB")
     print("[OK] Selftest monitoringu. Status:", js["current"]["date"], js["current"]["cdi_class"])
     print(val[["product", "reference", "segment", "subset", "metric", "value", "n"]].round(3).to_string(index=False))
 
