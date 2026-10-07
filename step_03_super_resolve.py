@@ -35,7 +35,7 @@ logger = logging.getLogger("AgriWatch_SR")
 SEN2SR_BANDS = ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "B12"]
 SEN2SR_MODEL_URL = "https://huggingface.co/tacofoundation/sen2sr/resolve/main/SEN2SRLite/main/mlm.json"
 SR_FACTOR = 4
-MODEL_TILE = 128          # sen2sr.predict_large tnie obraz na kafelki 128x128 px
+MODEL_TILE = 128          # sen2sr.predict_large tnie obraz na kafelki 128x128 px (i wymaga kwadratu)
 
 
 # ==============================================================================
@@ -76,14 +76,20 @@ def super_resolve(arr10: np.ndarray, model: Any, device: Any, overlap: int = 32)
     nan_mask = ~np.isfinite(arr10).all(axis=0)
     c, h, w = arr10.shape
     x = np.nan_to_num(arr10, nan=0.0, posinf=0.0, neginf=0.0).astype("float32")
-    # Model pracuje zawsze na kafelkach 128x128; predict_large nie dopełnia osi < 128 px
-    # (np. AOI 120 px szerokości -> błąd w hard_constraint). Dopełniamy odbiciem i przycinamy wynik.
-    ph, pw = max(MODEL_TILE - h, 0), max(MODEL_TILE - w, 0)
+    # Model pracuje zawsze na kafelkach 128x128. predict_large z sen2sr 0.8.5 (PyPI) działa poprawnie
+    # tylko dla obrazów kwadratowych (zamienione indeksy wiersz/kolumna, wyjście H x H) i nie dopełnia
+    # osi < 128 px; dla obrazu dokładnie 128x128 zostawia w wyniku zera (~23%). Dopełniamy odbiciem
+    # do kwadratu o boku max(H, W, 128); pojedynczy kafelek idzie wprost do modelu. Wynik przycinamy.
+    side = max(h, w, MODEL_TILE)
+    ph, pw = side - h, side - w
     if ph or pw:
         x = np.pad(x, ((0, 0), (0, ph), (0, pw)), mode="reflect" if min(h, w) > 1 else "edge")
     x = torch.from_numpy(x).to(device)
     with torch.no_grad():
-        y = sen2sr.predict_large(model=model, X=x, overlap=overlap)
+        if side == MODEL_TILE:
+            y = model(x[None]).squeeze(0)
+        else:
+            y = sen2sr.predict_large(model=model, X=x, overlap=overlap)
     out = y.detach().float().cpu().numpy()[:, : h * SR_FACTOR, : w * SR_FACTOR]
     del x, y
     if hasattr(torch, "cuda") and torch.cuda.is_available():
