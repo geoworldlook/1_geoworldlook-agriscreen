@@ -91,6 +91,7 @@ Konfiguracja stacji: `STATION_CONFIG` w `step_07_station_pipeline.py`.
 | Dokument | Status |
 |---|---|
 | `docs/plans/Plan_v3_monitoring_winnic_SR.md` | `APPROVED` (2026-10-06); część A = przegląd literatury, z którego korzysta kod (EDO CDI, walidacja anomalii, SR) |
+| `docs/plans/Plan_v6_platforma_anomalii_wilgotnosci.md` | `PROPOSED` (2026-10-07) — platforma na wzór WineEO dla 15 winnic; przegląd literatury i propozycje Z1–Z8 w `docs/evidence/F3_przeglad_literatury_platforma.md` |
 | `docs/plans/Plan_v5_bilans_wodny_winnic.md` | `PROPOSED` (bilans wodny FAO-56) — niezatwierdzony, nie jest zaimplementowany |
 | `docs/plans/Plan_v4_cel_zawodowy.md` | `SUPERSEDED` |
 | `docs/plans/F0…`, `F1…`, `Plan_wdrozenia_pipeline.md`, `Plan_GeoWorldLook_Jupyter_Colab.md`, `Plan_6_tygodni.md` | historyczne; odwołują się do plików `step_02`, `step_06`, które są teraz w `legacy/` |
