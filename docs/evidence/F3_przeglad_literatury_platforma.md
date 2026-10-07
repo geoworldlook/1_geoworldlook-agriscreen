@@ -266,6 +266,47 @@ Każdy nowy wskaźnik przechodzi ten sam test, zapisany przed obliczeniem:
 
 ---
 
+## 7. Wskaźniki wilgotności roślin oddzielające tło (gleba, międzyrzędzie)
+
+**Odpowiedź w skrócie:** żaden indeks spektralny nie oddziela w pełni winorośli od gleby i trawy w pikselu 10–20 m. Wskaźniki z tej grupy **zmniejszają** wpływ tła na trzy sposoby:
+1. normalizacja jasności (SAVI, CRSWIR),
+2. różna reakcja gleby i liści w dwóch pasmach SWIR (NMDI),
+3. dzielenie przez wskaźnik zieloności (NDWI/EVI).
+
+Pełne oddzielenie dają dopiero metody modelowe (PROSAIL) i rozmieszanie piksela (przestrzenne lub czasowe).
+
+**Ograniczenie wspólne dla całej grupy:** wszystkie używają pasm SWIR B11 i B12, czyli pasm 20 m. Po SEN2SR te pasma nie przechodzą kontroli H-SR1, więc liczymy je **w natywnych 20 m**. Winnica 0,7 ha to ~17 pikseli 20 m, a po usunięciu brzegu mniej. Rastry z `step_01` już mają B8A, B11 i B12, więc nie trzeba nic pobierać.
+
+### 7.1 Kandydaci
+
+| Wskaźnik | Wzór (Sentinel-2) | Co robi z tłem | Dowody | Poziom |
+|---|---|---|---|---|
+| **CRSWIR** | B11 / [B8A + (B12 − B8A)·(λ11 − λ8A)/(λ12 − λ8A)]; λ ≈ 865, 1610, 2190 nm | Usuwa „kontinuum” między NIR a SWIR-2. Zostaje głębokość absorpcji wody przy 1610 nm, mniej zależna od jasności sceny i gleby. Wyższa wartość = mniej wody | INRAE FORDEAD: wykrywanie zamierania lasów (kornik) z szeregów S-2 od 2015 r., anomalia piksela wobec własnej sezonowości ([HAL](https://hal.inrae.fr/hal-04769547v1/document), [DRAAF](https://draaf.auvergne-rhone-alpes.agriculture.gouv.fr/IMG/pdf/241105_presentation_dsf.pdf)). Nie znalazłem zastosowań w winnicach | snippet; wzór z pamięci — sprawdzić w kodzie `fordead` |
+| **NMDI** | [B8A − (B11 − B12)] / [B8A + (B11 − B12)] | Różnica B11 − B12 inaczej reaguje na wodę w glebie i w liściach. Indeks został zaprojektowany do rozróżniania wilgotności gleby i roślin | Wang i Qu 2007, GRL 34 ([DOI](https://doi.org/10.1029/2007GL031021)); wzór w dokumentacji [ESA SNAP](https://step.esa.int/main/wp-content/help/versions/13.0.0/snap-toolboxes/eu.esa.opt.opttbx.radiometric.indices.ui/nmdi/NmdiAlgorithmSpecification.html). MODIS: stabilniejszy niż NDWI w sezonowości i suszy. Interpretacja zależy od pokrycia: przy rzadkiej roślinności wskaźnik mówi o glebie, przy gęstej o liściach | snippet |
+| **GVMI** | [(B8A + 0,1) − (B11 + 0,02)] / [(B8A + 0,1) + (B11 + 0,02)] | Przesunięcia stałe zmniejszają wpływ atmosfery i gleby (Ceccato 2002) | Maffei i in. 2025 (winnice, wpływ podłoża): GVMI najskuteczniejszym i najstabilniejszym predyktorem; lepiej poza sezonem | snippet; współczynniki z pamięci |
+| **NDWI / EVI** | NDMI(B8A, B11) / EVI | Wilgotność „na jednostkę zieleni”: zmniejsza wpływ ilości liści i tła | Delval i in., 2 winnice w Belgii (trawa w międzyrzędziu): najlepszy z testowanych wskaźników S-2; R² 0,67 z Ψpd (NDWI: 0,64) ([EGU22-3908](https://meetingorganizer.copernicus.org/EGU22/EGU22-3908.html), konferencja) | snippet |
+| NDMI = NDII (mamy) | (B8A − B11)/(B8A + B11) | Bez korekty tła | NDII vs EWT: R² 0,85 w jednym badaniu; formuły wskaźników wody przenoszą się słabo między uprawami (R² < 0,6 na 5 uprawach) | snippet |
+| MSAVI / OSAVI | wskaźniki zieloności z korektą linii gleby | Zmniejszają wpływ jasności gleby, nie trawy; mierzą zieleń, nie wodę | Klasyka (Qi 1994, Rondeaux 1996) | wiedza ogólna |
+
+### 7.2 Metody, które naprawdę oddzielają winorośl od tła
+
+| Metoda | Jak | Dowody | Dla nas |
+|---|---|---|---|
+| **Woda w łanie (CWC) z PROSAIL** | Sieć uczona na symulacjach PROSAIL z jasnością gleby jako parametrem → CWC = EWT × LAI | RSE 2025: CWC z S-2 i Landsat-8, R = 0,81, RMSE 0,046 g/cm² ([HAL](https://hal.inrae.fr/hal-05131852v1)). Nie testowane w winnicach; łan rzędowy łamie założenia modelu (jak SL2P, sekcja 6) | Za drogie na teraz; wrócić, gdy będzie gotowy model |
+| **Rozmieszanie przestrzenne** | Udział rzędu i międzyrzędzia w pikselu (z UAV lub mapy rzędów) → NDVI samego rzędu z ruchomego okna | De Petris i in. 2024 (Comput. Electron. Agric. 222): błąd NDVI rzędu 0,15, międzyrzędzia 0,10 ([UniTo](https://iris.unito.it/retrieve/handle/2318/1992850/1333428/1-s2.0-S0168169924004836-main.pdf)) | Wymaga mapy rzędów dla 15 winnic (ortofoto IGN BD ORTHO 20 cm — do sprawdzenia). Potem metoda zadziała też dla wskaźników SWIR |
+| **Rozmieszanie czasowe** | Zimą (XII–II) winorośl nie ma liści: NDVI i wskaźniki wody piksela to tło (gleba + trawa). Sygnał winorośli = wartość w sezonie minus tło zimowe danego roku, albo krzywa podwójnie logistyczna | Abubakar i in. 2023: krzywa podwójnie logistyczna oddziela LAI winorośli od tła i klasyfikuje zarządzanie międzyrzędziem. Dell'Acqua: zima najlepiej odróżnia trawę od uprawy. Pantaleoni 2022: NDVI zimą ~0,3 = gleba i rośliny zimozielone (pełny tekst) | **Najtańsza i zgodna z naszymi danymi** (Z14) |
+
+### 7.3 Propozycja
+
+| ID | Zmiana | Test (wg 6.2) | Koszt |
+|---|---|---|---|
+| Z14 | Dla każdej winnicy w natywnych 20 m: CRSWIR, NMDI, GVMI, NDWI/EVI (obok NDMI). Do tego **przyrost sezonowy** każdego wskaźnika: wartość minus mediana XII–II danego sezonu (tło międzyrzędzia). Wszystko jako anomalie wobec innych lat | Jedno zestawienie: R anomalii z czujnikiem 20–30 cm (paired), wartość dodana ponad ERA5, 2022 w ≥ 12 z 15 winnic, stabilność w IV–V. Do statusu wchodzi najwyżej jeden wskaźnik wody, i to tylko jeśli wygra z NDVI | 2–3 h; bez pobierania nowych danych |
+| Z15 | (później) NDVI i wskaźniki wody samego rzędu przez rozmieszanie przestrzenne z mapą rzędów | Jak Z14 | 1–2 dni + mapa rzędów |
+
+**Ocena:** najbardziej obiecujące dla nas jest połączenie **wskaźnika wody z korektą tła (NDWI/EVI lub CRSWIR)** z **odjęciem tła zimowego**. Oba sposoby są tanie i dają się sprawdzić na danych, które już mamy. Do czasu testu nie zakładam, że któryś będzie lepszy od NDVI: nasze NDMI (bez korekty) dało R ≈ 0,4, tyle co NDVI.
+
+---
+
 ## Źródła
 
 **Pełny tekst (przekazane przez użytkownika):**

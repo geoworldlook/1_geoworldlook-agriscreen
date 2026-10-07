@@ -234,6 +234,7 @@ Publikacja tak jak w v5. Notatnik wysyła pliki do repozytorium strony tokenem G
 | D-035 | Harmonogram 8 tygodni (12 X – 6 XII 2026), cięcia z sekcji 8 |
 | D-036 | Zmiany metody z przeglądu F3 (sekcja 5): Z1 pełna logika EDO CDI v4.1.1, Z2 warstwa roślinności w statusie VI–IX (po teście POD/FAR zapisanym przed zmianą), Z4 wspólny pas brzegowy w metrach; następnie Z8, Z3, Z5, Z6 |
 | D-037 | Dodatkowe wskaźniki z F3, sekcja 6: Z11 NDMI z pasm natywnych i Z9 SPEI-3 na karcie; Z10 CGLS SWI jako drugie źródło gleby; Z12 fAPAR i Z13 LST Landsat jako testy według zasady 6.2. Bez VCI, kNDVI, NDRE, OPTRAM/STR i S-1 na poziomie działki |
+| D-038 | Wskaźniki wody z korektą tła (F3, sekcja 7): Z14 — CRSWIR, NMDI, GVMI, NDWI/EVI w natywnych 20 m + odjęcie tła zimowego, jeden wspólny test; Z15 rozmieszanie przestrzenne później |
 
 ---
 
