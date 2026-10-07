@@ -39,7 +39,7 @@ Zależności między modułami: `step_05` importuje `step_01/03/04/07` leniwie (
 |---|---|---|
 | `task_ingest_s2` | AOI + bufor 320 m, sezon IV–X, ≤ 40% chmur nad AOI | `data/01_Raw_Sentinel2/S2_L2A_*.tif` |
 | `task_ingest_era5` | centroid winnicy, 1991 → dziś | `data/02_ERA5_Land/era5_land_daily.csv` |
-| `task_scene_stats` | nowe sceny (brak w `gwl_observations`) | statystyki obiektów 10 m i — jeśli SR przeszedł H-SR0/H-SR1 — 2,5 m; QC SR jako `product = SR_QC`; zapis co 25 scen (wznawianie po przerwanej sesji) |
+| `task_scene_stats` | nowe sceny (brak w `gwl_observations`) | statystyki obiektów 10 m i 2,5 m (tylko indeksy, których pasma przeszły H-SR0/H-SR1); QC SR jako `product = SR_QC`; zapis co 25 scen (wznawianie po przerwanej sesji) |
 | `task_anomalies` | ERA5, obserwacje roślinności | `gwl_anomalies`, `gwl_status`, CSV w `OUTPUT_DIR` |
 | `task_validate` | anomalie i status | `gwl_validation_metrics` (R anomalii vs ISMN 5/20/30 cm, POD/FAR) |
 | `task_bulletin` | status, anomalie, walidacja | `bulletin.md`, wykresy PNG, `agriwatch_latest.json` |
@@ -56,7 +56,10 @@ Zależności między modułami: `step_05` importuje `step_01/03/04/07` leniwie (
 - **Produkt roślinności do statusu:** `S2_10m`. SR 2,5 m jest liczony równolegle; do statusu wejdzie,
   jeśli walidacja pokaże przewagę (`VEG_PRODUCT` w `MONITOR_CONFIG`).
 - **Kontrola SR:** H-SR0 — `std(SR − bikubika) / std(SR) ≥ 0,02` (model faktycznie działał);
-  H-SR1 — RMSE(średnia 4×4 z SR, obraz 10 m) ≤ 0,01 (spójność radiometryczna). Brak modelu = błąd zgłoszony, bez zastępstwa interpolacją.
+  H-SR1 — RMSE(SR uśredniony do natywnej rozdzielczości pasma, wejście) ≤ 0,01 (spójność radiometryczna):
+  pasma 10 m (B02, B03, B04, B08) w blokach 4×4, pasma 20 m (B05–B07, B8A, B11, B12) w blokach 8×8 względem pikseli 20 m
+  (przesunięcie siatki 20 m wykrywane z powielonych pikseli). Kontrola osobno dla grup: NDVI z 2,5 m wymaga grupy 10 m,
+  NDMI i NDRE — grupy 20 m. Brak modelu = błąd zgłoszony, bez zastępstwa interpolacją.
 
 ## 5. Rejestr `gwl_*` (Dysk Google, `data/registry/`)
 

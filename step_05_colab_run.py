@@ -374,7 +374,7 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "SR_MODEL_DIR": "data/models/SEN2SRLite_main",
     "SR_MAX_SCENES_PER_RUN": 150,
     "SR_MIN_DETAIL_RATIO": 0.02,          # H-SR0: v1 (interpolacja) = 0,005
-    "SR_MAX_CONSISTENCY_RMSE": 0.01,      # H-SR1: reflektancja
+    "SR_MAX_CONSISTENCY_RMSE": 0.01,      # H-SR1: reflektancja, w natywnej rozdzielczości pasma (10 m / 20 m)
     "SR_DIR": "data/03_SR_2.5m",
     "SHOWCASE_MONTHS": ["2022-07", "2022-08"],
     "SHOWCASE_SEASON": 2022,
@@ -453,10 +453,11 @@ def _sites_rows(sites, cfg: Dict[str, Any]) -> pd.DataFrame:
     })
 
 
-def _stats_to_obs(recs: List[Dict[str, Any]], run_tag: str) -> pd.DataFrame:
+def _stats_to_obs(recs: List[Dict[str, Any]], run_tag: str,
+                  variables: tuple = ("ndvi", "ndmi", "ndre", "clear_frac")) -> pd.DataFrame:
     rows = []
     for r in recs:
-        for var in ("ndvi", "ndmi", "ndre", "clear_frac"):
+        for var in variables:
             rows.append({"site_id": r["site_id"], "product": r["product"], "variable": var,
                          "time_utc": r["time"].strftime("%Y-%m-%dT%H:%M:%SZ"), "orbit": 0, "value": r[var],
                          "unit": "1", "n_pixels": r["n_pixels"], "qc_flags": r["px_method"], "calib_id": "",
@@ -481,14 +482,19 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
     done = {p: set(obs.loc[obs["product"] == p, "time_utc"].astype(str)) for p in ("S2_10m", "S2SR_2.5m")}
     state = {"sites": None, "model": None, "dev": None, "sr_error": None}
     buf: List[Dict[str, Any]] = []
+    buf_sr: Dict[tuple, List[Dict[str, Any]]] = {}     # zmienne SR przyjęte przez kontrolę -> rekordy
     qc: List[Dict[str, Any]] = []
-    n10 = nsr = nsr_ok = 0
+    n10 = nsr = nsr_ok = nsr_ok20 = 0
     showcase = set(cfg["SHOWCASE_MONTHS"])
 
     def flush():
         if buf:
             registry_upsert(rt, "gwl_observations", _stats_to_obs(buf, tag))
             buf.clear()
+        for variables, recs in buf_sr.items():
+            if recs:
+                registry_upsert(rt, "gwl_observations", _stats_to_obs(recs, tag, variables))
+        buf_sr.clear()
         if qc:
             registry_upsert(rt, "gwl_observations", pd.DataFrame(qc))
             qc.clear()
@@ -520,15 +526,19 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
                 arr25 = s3.super_resolve(arr, state["model"], state["dev"])
                 chk = s3.sr_checks(arr, arr25, cfg)
                 nsr += 1
-                for var in ("detail_ratio_min", "consistency_rmse_max", "sr_ok"):
+                for var in ("detail_ratio_min", "consistency_rmse_max", "sr_ok",
+                            "detail_ratio_min_20m", "consistency_rmse_max_20m", "sr_ok_20m"):
                     qc.append({"site_id": "AOI", "product": "SR_QC", "variable": var, "time_utc": tkey, "orbit": 0,
                                "value": float(chk[var]), "unit": "1", "n_pixels": np.nan, "qc_flags": "",
                                "calib_id": "SEN2SRLite_main", "run_id": tag, "ingested_at": _utc_now()})
                 if chk["sr_ok"]:
+                    # NDVI z SR tylko po kontroli grupy 10 m; NDMI i NDRE (pasma 20 m) tylko po kontroli grupy 20 m
                     nsr_ok += 1
+                    nsr_ok20 += int(chk["sr_ok_20m"])
+                    variables = ("ndvi", "ndmi", "ndre", "clear_frac") if chk["sr_ok_20m"] else ("ndvi", "clear_frac")
                     p25 = s3.profile_25m(prof)
                     c25 = np.repeat(np.repeat(cloud, 4, 0), 4, 1)
-                    buf.extend(s4.site_stats(arr25, c25, p25, sites, "S2SR_2.5m", t))
+                    buf_sr.setdefault(variables, []).extend(s4.site_stats(arr25, c25, p25, sites, "S2SR_2.5m", t))
                     if t.strftime("%Y-%m") in showcase or k == len(scenes) - 1:
                         stem = os.path.join(cfg["SR_DIR"], f"{t:%Y%m%d}")
                         s1.write_geotiff(s4.compute_indices(arr25)["ndvi"], p25, stem + "_NDVI_2.5m.tif")
@@ -536,11 +546,17 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
                         s3.plot_sr_comparison(arr, arr25, f"Sentinel-2 {t:%Y-%m-%d}: 10 m vs SEN2SR 2.5 m",
                                               stem + "_comparison.png", sites, prof)
                 else:
-                    logger.warning(f"{tkey}: SR odrzucony (H-SR0={chk['pass_hsr0']}, H-SR1={chk['pass_hsr1']})")
+                    logger.warning(f"{tkey}: SR odrzucony (pasma 10 m: H-SR0={chk['pass_hsr0']}, "
+                                   f"H-SR1={chk['pass_hsr1']}, RMSE={chk['consistency_rmse_max']:.4f})")
+                if not chk["sr_ok_20m"]:
+                    logger.info(f"{tkey}: SR pasm 20 m odrzucony (H-SR0={chk['pass_hsr0_20m']}, "
+                                f"H-SR1={chk['pass_hsr1_20m']}, RMSE={chk['consistency_rmse_max_20m']:.4f}) "
+                                f"— bez NDMI/NDRE z 2,5 m")
         if (n10 + nsr) % 25 == 0:
             flush()
     flush()
-    msg = f"10 m: {n10} nowych scen; SR: {nsr} scen, {nsr_ok} przeszło kontrolę"
+    msg = (f"10 m: {n10} nowych scen; SR: {nsr} scen, {nsr_ok} przeszło kontrolę pasm 10 m (NDVI), "
+           f"{nsr_ok20} pasm 20 m (NDMI, NDRE)")
     if state["sr_error"]:
         msg += f"; SR niedostępny: {state['sr_error'][:200]}"
     reg = {"gwl_sites": _sites_rows(state["sites"], cfg)} if state["sites"] is not None else {}
@@ -562,6 +578,8 @@ def _veg_anomalies(rt: Dict[str, Any], cfg: Dict[str, Any]) -> pd.DataFrame:
     parts = []
     for (site, prod), g in w.groupby(["site_id", "product"]):
         for idx in ("ndvi", "ndmi"):
+            if idx not in g or g[idx].isna().all():      # np. NDMI z SR, gdy pasma 20 m nie przeszły kontroli
+                continue
             a = s4.scene_anomaly(g, idx, cfg)
             if len(a):
                 parts.append(pd.DataFrame({"site_id": site, "product": prod, "index": idx, "time": a["time"].to_numpy(),
@@ -717,7 +735,22 @@ def _selftest(out_dir: str) -> None:
     assert not s3.sr_checks(lo, fake_interp, cfg)["pass_hsr0"], "Interpolacja nie może przejść H-SR0"
     chk = s3.sr_checks(lo, fake_sr, cfg)
     assert chk["sr_ok"], chk
-    print("[OK] Kontrola SR: interpolacja odrzucona, spójny SR przyjęty.")
+    # Pasma 20 m jak z eksportu GEE (piksele 20 m powielone 2x2 na siatce 10 m, przesunięte o 1 px).
+    # SR z detalem wewnątrz pikseli 20 m: spójny w 20 m, ale w siatce 10 m różni się od wejścia o ten detal.
+    lo20, sr20 = lo.copy(), fake_sr.copy()
+    for name in s3.BANDS_20M:
+        i = s3.SEN2SR_BANDS.index(name)
+        c = np.clip(rng.normal(0.25, 0.05, (33, 33)), 0.01, 1)
+        noise = rng.normal(0, 0.06, (264, 264))
+        noise -= np.repeat(np.repeat(s3.block_mean(noise, 8), 8, 0), 8, 1)
+        lo20[i] = np.repeat(np.repeat(c, 2, 0), 2, 1)[1:65, 1:65]
+        sr20[i] = (np.repeat(np.repeat(c, 8, 0), 8, 1) + noise)[4:260, 4:260]
+    b11 = s3.SEN2SR_BANDS.index("B11")
+    assert s3._band_checks(lo20[b11], sr20[b11], native_20m=False)[1] > cfg["SR_MAX_CONSISTENCY_RMSE"]
+    assert s3.grid20_offset(lo20[s3.SEN2SR_BANDS.index("B11")]) == (1, 1)
+    chk20 = s3.sr_checks(lo20, sr20, cfg)
+    assert chk20["sr_ok"] and chk20["sr_ok_20m"], chk20
+    print("[OK] Kontrola SR: interpolacja odrzucona, spójny SR przyjęty (pasma 10 m i 20 m w natywnej rozdzielczości).")
 
     for name, fn in (("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
                      ("validate", task_validate), ("bulletin", task_bulletin)):

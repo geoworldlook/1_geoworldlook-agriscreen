@@ -13,7 +13,12 @@ Zasady (wnioski z wersji v1 i z literatury):
     (v1 po cichu używała interpolacji: różnica „SR” - bikubika = 0,5% zmienności obrazu.)
   - Każda scena przechodzi dwie kontrole i wynik trafia do rejestru:
       H-SR0  SR różni się od interpolacji bikubicznej (model naprawdę działał),
-      H-SR1  SR uśredniony 4x4 zgadza się z obrazem 10 m (spójność radiometryczna).
+      H-SR1  SR uśredniony do natywnej rozdzielczości pasma zgadza się z obrazem wejściowym
+             (spójność radiometryczna): pasma 10 m w blokach 4x4, pasma 20 m w blokach 8x8
+             względem pikseli 20 m. Pasma 20 m na siatce 10 m to powielone piksele (eksport GEE
+             bez resamplingu), więc porównanie ich z siatką 10 m karałoby SR za brak bloków 2x2.
+    Kontrole są liczone osobno dla grup 10 m i 20 m: indeks z SR jest przyjmowany tylko wtedy,
+    gdy wszystkie jego pasma przeszły (NDVI: grupa 10 m; NDMI, NDRE: grupa 20 m).
   - SR nie dodaje informacji o wodzie; służy do czystszych statystyk małych obiektów
     (poligon stacji ~210 m², brzegi winnic). Czy to coś daje, rozstrzyga walidacja w kroku 4/7.
   - Niezależna ocena (Hollendonner 2025, TU Wien): w zadaniu wyznaczania budynków SEN2SR-Lite
@@ -36,6 +41,8 @@ SEN2SR_BANDS = ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "
 SEN2SR_MODEL_URL = "https://huggingface.co/tacofoundation/sen2sr/resolve/main/SEN2SRLite/main/mlm.json"
 SR_FACTOR = 4
 MODEL_TILE = 128          # sen2sr.predict_large tnie obraz na kafelki 128x128 px (i wymaga kwadratu)
+BANDS_10M = ("B02", "B03", "B04", "B08")
+BANDS_20M = ("B05", "B06", "B07", "B8A", "B11", "B12")
 
 
 # ==============================================================================
@@ -132,36 +139,75 @@ def bicubic_upsample(arr10: np.ndarray, f: int = SR_FACTOR) -> np.ndarray:
     return zoom(a, factors, order=3, grid_mode=True, mode="grid-mirror")
 
 
+def grid20_offset(band10: np.ndarray) -> Tuple[int, int]:
+    """
+    Przesunięcie (wiersz, kolumna) ∈ {0, 1}² siatki 20 m względem siatki 10 m: pasmo 20 m pobrane
+    na siatce 10 m metodą najbliższego sąsiada ma pary identycznych pikseli zaczynające się od tego
+    przesunięcia. Brak wyraźnego wzorca (np. resampling bilinearny) -> (0, 0).
+    """
+    a = band10
+    best, frac_best = (0, 0), 0.0
+    for oy in (0, 1):
+        for ox in (0, 1):
+            b = a[oy:, ox:]
+            h, w = (b.shape[0] // 2) * 2, (b.shape[1] // 2) * 2
+            if h < 2 or w < 2:
+                continue
+            b = b[:h, :w]
+            with np.errstate(invalid="ignore"):
+                same = (b[:, 0::2] == b[:, 1::2])[0::2] & (b[0::2] == b[1::2])[:, 0::2]
+            fin = np.isfinite(b[0::2, 0::2])
+            frac = float(same[fin].mean()) if fin.any() else 0.0
+            if frac > frac_best:
+                best, frac_best = (oy, ox), frac
+    return best if frac_best >= 0.9 else (0, 0)
+
+
+def _band_checks(lo10: np.ndarray, hi: np.ndarray, native_20m: bool) -> Tuple[float, float]:
+    """(detail_ratio, consistency_rmse) jednego pasma; spójność w natywnej rozdzielczości pasma."""
+    m = np.isfinite(hi)
+    bic = bicubic_upsample(lo10)[: hi.shape[0], : hi.shape[1]]
+    ratio = float(np.std((hi - bic)[m]) / max(np.std(hi[m]), 1e-9))
+    if native_20m:
+        oy, ox = grid20_offset(lo10)
+        ref = block_mean(lo10[oy:, ox:], 2)
+        agg = block_mean(hi[oy * SR_FACTOR:, ox * SR_FACTOR:], 2 * SR_FACTOR)
+    else:
+        ref, agg = lo10, block_mean(hi)
+    h, w = min(ref.shape[0], agg.shape[0]), min(ref.shape[1], agg.shape[1])
+    d = agg[:h, :w] - ref[:h, :w]
+    d = d[np.isfinite(d)]
+    rmse = float(np.sqrt(np.mean(d ** 2))) if d.size else np.nan
+    return ratio, rmse
+
+
 def sr_checks(arr10: np.ndarray, arr25: np.ndarray, cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     H-SR0: detail_ratio = std(SR - bikubika) / std(SR). Interpolacja daje ~0 (v1: 0,005).
-    H-SR1: consistency_rmse = RMSE(średnia 4x4 z SR, obraz 10 m) w jednostkach reflektancji.
-    Liczone dla pasm 10 m (B02, B03, B04, B08) i SWIR (B11, B12); wynik = najgorsze pasmo.
+    H-SR1: consistency_rmse = RMSE(SR uśredniony do natywnej rozdzielczości pasma, wejście) w reflektancji.
+    Wynik dla grup pasm 10 m (BANDS_10M) i 20 m (BANDS_20M) = najgorsze pasmo w grupie.
+      sr_ok      — grupa 10 m przeszła obie kontrole (SR można użyć do NDVI),
+      sr_ok_20m  — grupa 20 m przeszła obie kontrole (SR można użyć do NDMI i NDRE).
     """
     out: Dict[str, Any] = {}
-    ratios, rmses = [], []
-    for name in ("B02", "B03", "B04", "B08", "B11", "B12"):
-        i = SEN2SR_BANDS.index(name)
-        lo, hi = arr10[i], arr25[i]
-        valid = np.isfinite(lo)
-        if valid.mean() < 0.5:
-            continue
-        agg = block_mean(hi)
-        h, w = agg.shape
-        d = (agg - lo[:h, :w])[valid[:h, :w] & np.isfinite(agg)]
-        rmse = float(np.sqrt(np.mean(d ** 2))) if d.size else np.nan
-        bic = bicubic_upsample(lo)[: hi.shape[0], : hi.shape[1]]
-        m = np.isfinite(hi)
-        ratio = float(np.std((hi - bic)[m]) / max(np.std(hi[m]), 1e-9))
-        out[f"consistency_rmse_{name}"] = rmse
-        out[f"detail_ratio_{name}"] = ratio
-        ratios.append(ratio)
-        rmses.append(rmse)
-    out["detail_ratio_min"] = float(np.nanmin(ratios)) if ratios else np.nan
-    out["consistency_rmse_max"] = float(np.nanmax(rmses)) if rmses else np.nan
-    out["pass_hsr0"] = bool(out["detail_ratio_min"] >= cfg["SR_MIN_DETAIL_RATIO"])
-    out["pass_hsr1"] = bool(out["consistency_rmse_max"] <= cfg["SR_MAX_CONSISTENCY_RMSE"])
-    out["sr_ok"] = out["pass_hsr0"] and out["pass_hsr1"]
+    for group, bands, suffix in (("10m", BANDS_10M, ""), ("20m", BANDS_20M, "_20m")):
+        ratios, rmses = [], []
+        for name in bands:
+            i = SEN2SR_BANDS.index(name)
+            if np.isfinite(arr10[i]).mean() < 0.5:
+                continue
+            ratio, rmse = _band_checks(arr10[i], arr25[i], native_20m=(group == "20m"))
+            out[f"detail_ratio_{name}"] = ratio
+            out[f"consistency_rmse_{name}"] = rmse
+            ratios.append(ratio)
+            rmses.append(rmse)
+        dr = float(np.nanmin(ratios)) if ratios else np.nan
+        cr = float(np.nanmax(rmses)) if rmses else np.nan
+        out[f"detail_ratio_min{suffix}"] = dr
+        out[f"consistency_rmse_max{suffix}"] = cr
+        out[f"pass_hsr0{suffix}"] = bool(dr >= cfg["SR_MIN_DETAIL_RATIO"])
+        out[f"pass_hsr1{suffix}"] = bool(cr <= cfg["SR_MAX_CONSISTENCY_RMSE"])
+        out[f"sr_ok{suffix}"] = out[f"pass_hsr0{suffix}"] and out[f"pass_hsr1{suffix}"]
     return out
 
 
