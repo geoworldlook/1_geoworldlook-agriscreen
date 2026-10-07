@@ -1107,18 +1107,36 @@ def validate_anomalies(
         add("ERA5L_SM_RZ", "ISMN_20_30cm", kind, "ERA5 cell", "pearson_r", r, lo, hi, len(p), p.index.min(), p.index.max())
 
     # 3. Roślinność S-2 vs anomalia 20-30 cm w dniu sceny (sezon wegetacyjny)
+    #    anomaly_clim        — wszystkie sceny danego produktu,
+    #    anomaly_clim_paired — tylko dni, w których są oba produkty (10 m i SR 2,5 m): porównanie 10 m vs SR
+    #                          na tych samych scenach (SR liczony jest partiami, więc obejmuje krótszy okres).
     if len(veg):
         foot = {f"{sid}_poly": "station plot", sid: f"station buffer {cfg['STATION_BUFFER_M']} m",
                 **{v: f"vineyard {v} (indirect, 136 m)" for v in vineyard_ids}}
+        days: Dict[Tuple[str, str, str], pd.Series] = {}
         for (site, prod, idx), g in veg.groupby(["site_id", "product", "index"]):
             if site not in foot:
                 continue
             g = g.dropna(subset=["z"]).copy()
             g["day"] = g["time"].dt.floor("D")
-            p = g.set_index("day")["z"].groupby(level=0).mean().to_frame("x").join(ins_z.rename("y")).dropna()
+            days[(site, prod, idx)] = g.set_index("day")["z"].groupby(level=0).mean()
+
+        def add_veg(site, prod, idx, z, kind):
+            p = z.to_frame("x").join(ins_z.rename("y")).dropna()
             r, lo, hi = _r_with_ci(pd.Series(p.index), p["x"].to_numpy(), p["y"].to_numpy(), cfg)
-            add(f"{prod}_{idx.upper()}", "ISMN_20_30cm", "anomaly_clim", foot[site], "pearson_r", r, lo, hi, len(p),
+            add(f"{prod}_{idx.upper()}", "ISMN_20_30cm", kind, foot[site], "pearson_r", r, lo, hi, len(p),
                 p.index.min() if len(p) else None, p.index.max() if len(p) else None)
+
+        for (site, prod, idx), z in days.items():
+            add_veg(site, prod, idx, z, "anomaly_clim")
+        for (site, prod, idx), z_sr in days.items():
+            z10 = days.get((site, "S2_10m", idx))
+            if prod != "S2SR_2.5m" or z10 is None:
+                continue
+            common_days = z10.index.intersection(z_sr.index)
+            if len(common_days):
+                add_veg(site, "S2_10m", idx, z10.loc[common_days], "anomaly_clim_paired")
+                add_veg(site, prod, idx, z_sr.loc[common_days], "anomaly_clim_paired")
 
     # 4. Wykrywanie susz w dekadach (SMA produktu vs anomalia 20-30 cm)
     if len(status):
