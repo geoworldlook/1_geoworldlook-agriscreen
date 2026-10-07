@@ -1061,6 +1061,86 @@ def read_geotiff_to_numpy(path: str) -> Tuple[np.ndarray, Dict[str, Any]]:
     return data, profile
 
 
+def write_geotiff(data: np.ndarray, profile: Dict[str, Any], path: str, nodata: float = np.nan) -> str:
+    """Zapisuje tablicę (H, W) lub (C, H, W) jako GeoTIFF float32 z kompresją (kafle 256)."""
+    arr = data[np.newaxis] if data.ndim == 2 else data
+    prof = profile.copy()
+    prof.update(driver="GTiff", count=arr.shape[0], height=arr.shape[1], width=arr.shape[2],
+                dtype="float32", nodata=nodata, compress="deflate", tiled=True, blockxsize=256, blockysize=256)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with rasterio.open(path, "w", **prof) as dst:
+        dst.write(arr.astype(np.float32))
+    return path
+
+
+# ==============================================================================
+# V-b. ERA5-LAND: DZIENNE SERIE W PUNKCIE (WILGOTNOŚĆ 3 WARSTW, OPAD, TEMPERATURA)
+# ==============================================================================
+# Całe AOI mieści się w jednym oczku ERA5-Land (~9 km), więc pobieramy serię punktową, nie raster.
+# Warstwy CHTESSEL: 1 = 0-7 cm, 2 = 7-28 cm, 3 = 28-100 cm (Muñoz-Sabater i in. 2021, ESSD 13:4349).
+
+ERA5_LAND_BANDS = {
+    "volumetric_soil_water_layer_1": "sm_l1",
+    "volumetric_soil_water_layer_2": "sm_l2",
+    "volumetric_soil_water_layer_3": "sm_l3",
+    "total_precipitation_sum": "precip_mm",
+    "temperature_2m_min": "t2m_min_c",
+    "temperature_2m": "t2m_c",
+}
+
+
+def fetch_era5_land_daily(lat: float, lon: float, start: str, end: str) -> "pd.DataFrame":
+    """ERA5-Land DAILY_AGGR (GEE) w punkcie [start, end): wilgotność 3 warstw [m3/m3], opad [mm], T [°C]."""
+    import pandas as pd
+    col = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR").filterDate(start, end).select(list(ERA5_LAND_BANDS))
+    rows = col.getRegion(ee.Geometry.Point([lon, lat]), 11132).getInfo()
+    if len(rows) <= 1:
+        return pd.DataFrame(columns=["time"] + list(ERA5_LAND_BANDS.values()))
+    df = pd.DataFrame(rows[1:], columns=rows[0])
+    out = pd.DataFrame({"time": pd.to_datetime(df["time"], unit="ms")})
+    for band, name in ERA5_LAND_BANDS.items():
+        v = pd.to_numeric(df[band], errors="coerce")
+        if name == "precip_mm":
+            v = v * 1000.0
+        elif name.startswith("t2m"):
+            v = v - 273.15
+        out[name] = v.to_numpy()
+    return out.sort_values("time").reset_index(drop=True)
+
+
+def sync_era5_land_point(
+    lat: float, lon: float, start: str, end: str, cache_dir: str, chunk_months: int = 12,
+    refetch_days: int = 120,
+) -> "pd.DataFrame":
+    """
+    Przyrostowe pobieranie ERA5-Land do cache CSV (jeden plik na fragment).
+    Fragmenty kończące się ponad `refetch_days` dni temu są czytane z cache; nowsze są pobierane ponownie,
+    bo ERA5-Land dochodzi z opóźnieniem (wersja wstępna ~5 dni, finalna 2-3 miesiące).
+    """
+    import pandas as pd
+    os.makedirs(cache_dir, exist_ok=True)
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    a, stop = pd.Timestamp(start), pd.Timestamp(end) + pd.Timedelta(days=1)
+    frames = []
+    while a < stop:
+        b = min(a + pd.DateOffset(months=chunk_months), stop)
+        path = os.path.join(cache_dir, f"era5land_{a:%Y%m%d}_{b:%Y%m%d}.csv")
+        if os.path.exists(path) and b < now - pd.Timedelta(days=refetch_days):
+            frames.append(pd.read_csv(path, parse_dates=["time"]))
+        else:
+            logger.info(f"ERA5-Land: pobieranie {a:%Y-%m-%d} -> {b:%Y-%m-%d}")
+            df = fetch_era5_land_daily(lat, lon, f"{a:%Y-%m-%d}", f"{b:%Y-%m-%d}")
+            df.to_csv(path, index=False)
+            frames.append(df)
+        a = b
+    frames = [f for f in frames if not f.empty]
+    if not frames:
+        raise RuntimeError("ERA5-Land: brak danych w zadanym okresie.")
+    out = pd.concat(frames, ignore_index=True).drop_duplicates("time").sort_values("time").reset_index(drop=True)
+    logger.info(f"ERA5-Land: {len(out)} dni, {out['time'].min():%Y-%m-%d} -> {out['time'].max():%Y-%m-%d}")
+    return out
+
+
 # ==============================================================================
 # VI. SILNIK SYNCHRONIZACJI PRZYROSTOWEJ (INCREMENTAL SYNC 2016-DZIŚ)
 # ==============================================================================
@@ -1073,12 +1153,16 @@ def sync_sentinel2_time_series(
     manifest_path: str = "data/00_Metadata/ingest_manifest.json",
     cloud_thresh: int = 40,
     epsg_code: int = 32631,
-    max_scenes_per_year: Optional[int] = None
+    max_scenes_per_year: Optional[int] = None,
+    months: Optional[Tuple[int, int]] = None
 ) -> List[Dict[str, Any]]:
     """
     Pobiera wszystkie dostępne bezchmurne zobrazowania Sentinel-2 od 2016 roku do dziś.
     Działa przyrostowo (incremental download): sprawdza manifest JSON i istniejące pliki,
     pobierając wyłącznie nowe sceny.
+
+    months: opcjonalny zakres miesięcy (np. (4, 10) = sezon wegetacyjny winorośli).
+    Plik: 10 pasm reflektancji [0-1] (B02…B12, 20 m próbkowane do 10 m) + cloudmask + SCL.
     """
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
@@ -1105,6 +1189,8 @@ def sync_sentinel2_time_series(
     # Pobranie kolekcji S2 złączonej z s2cloudless z zachmurzeniem liczonym ściśle nad działkami
     s2_col = get_s2_sr_cld_collection(aoi, start_date, end_date, cloud_thresh=90)
     s2_col_clear = s2_col.filter(ee.Filter.lte('AOI_CLOUD_PERCENTAGE', cloud_thresh))
+    if months is not None:
+        s2_col_clear = s2_col_clear.filter(ee.Filter.calendarRange(int(months[0]), int(months[1]), 'month'))
 
     # Pobranie listy metadanych scen
     scenes_info = s2_col_clear.sort('system:time_start', True).getInfo().get('features', [])

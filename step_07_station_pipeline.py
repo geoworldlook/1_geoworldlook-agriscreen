@@ -382,21 +382,11 @@ def fetch_s2(ee, geom, start: str, end: str) -> pd.DataFrame:
 
 
 def fetch_era5(ee, point, start: str, end: str) -> pd.DataFrame:
-    """ERA5-Land Daily Aggregated w punkcie stacji: wilgotność warstwy 1 (0-7 cm), opad, T2m."""
-    bands = ["volumetric_soil_water_layer_1", "total_precipitation_sum", "temperature_2m_min", "temperature_2m"]
-    col = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR").filterDate(start, end).select(bands)
-    rows = col.getRegion(point, 11132).getInfo()
-    if len(rows) <= 1:
-        return pd.DataFrame(columns=["time"])
-    df = pd.DataFrame(rows[1:], columns=rows[0])
-    df["time"] = pd.to_datetime(df["time"], unit="ms")
-    return pd.DataFrame({
-        "time": df["time"],
-        "sm_era5": df["volumetric_soil_water_layer_1"].astype(float),
-        "precip_mm": df["total_precipitation_sum"].astype(float) * 1000.0,
-        "t2m_min_c": df["temperature_2m_min"].astype(float) - 273.15,
-        "t2m_c": df["temperature_2m"].astype(float) - 273.15,
-    })
+    """ERA5-Land w punkcie stacji (pobieranie: step_01.fetch_era5_land_daily); sm_era5 = warstwa 1 (0-7 cm)."""
+    from step_01_ingest import fetch_era5_land_daily
+    lon, lat = point.coordinates().getInfo()
+    df = fetch_era5_land_daily(lat, lon, start, end)
+    return df.rename(columns={"sm_l1": "sm_era5"})
 
 
 def extract_satellite(cfg: Dict[str, Any], lat: float, lon: float) -> Dict[str, pd.DataFrame]:
@@ -1036,6 +1026,121 @@ def run_station_pipeline(
             "orbit_refs": refs, "report_path": md, "plot_path": png, "run_dir": cfg["RUN_DIR"],
             "pipeline_version": PIPELINE_VERSION,
             "registry": registry_tables(cfg, meta, daily, sat, sm, refs, matchups, metrics, yearly)}
+
+
+# ==============================================================================
+# IX-b. WALIDACJA ANOMALII PRODUKTU MONITORINGU (krok 4) NA PROFILU GLEBOWYM CONDOM
+# ==============================================================================
+# Zasady (Gruber i in. 2020; protokół CEOS LPV; QA4SM):
+#  - walidujemy ANOMALIE (klimatologiczne i krótkoterminowe 35 dni), nie wartości bezwzględne,
+#  - klimatologia porównywanych serii z tego samego, wspólnego okresu (2016-2024),
+#  - każda metryka z 95% CI (bootstrap blokowy, autokorelacja) i liczbą par,
+#  - 5 cm: tylko anomalie krótkoterminowe w obrębie segmentu czujnika (zmiana ML3 -> ML2x w 2019),
+#  - strefa korzeni: średnia 20 i 30 cm (jeden czujnik ML3 przez cały okres).
+
+def insitu_daily_depth(depth_m: float, overrides: Dict[str, Any]) -> pd.DataFrame:
+    """Średnie dobowe po QC dla jednej głębokości (kolumny: sm, segment)."""
+    c = build_config({**overrides, "DEPTH_M": depth_m})
+    return insitu_daily(qc_insitu(load_insitu(c), c), c)
+
+
+def _r_with_ci(t: pd.Series, x: np.ndarray, y: np.ndarray, cfg: Dict[str, Any]) -> Tuple[float, float, float]:
+    if len(x) < cfg["MIN_N_METRICS"]:
+        return np.nan, np.nan, np.nan
+    r = float(np.corrcoef(x, y)[0, 1])
+    lo, hi = _block_bootstrap_ci(t.reset_index(drop=True), x, y, lambda a, b: np.corrcoef(a, b)[0, 1], cfg)
+    return r, lo, hi
+
+
+def validate_anomalies(
+    era5_daily: pd.DataFrame, veg: pd.DataFrame, status: pd.DataFrame, overrides: Dict[str, Any],
+    monitor_cfg: Dict[str, Any], vineyard_ids: List[str],
+) -> pd.DataFrame:
+    """
+    Zwraca wiersze gwl_validation_metrics (bez run_id):
+      1. ERA5-Land 0-7 cm vs czujnik 5 cm — R anomalii 35 dni (per segment czujnika),
+      2. ERA5-Land 0-100 cm vs czujniki 20-30 cm — R anomalii klimatologicznych i 35-dniowych,
+      3. anomalia NDVI/NDMI S-2 (10 m i SR 2,5 m; stacja i winnica) vs anomalia 20-30 cm w dniu sceny,
+      4. wykrywanie susz: dekady z SMA <= -1 (produkt) vs dekady z anomalią 20-30 cm <= -1 (POD, FAR).
+    """
+    from step_04_metrics_alert import clim_anomaly, rootzone
+
+    cfg = build_config(overrides)
+    sid = site_id(cfg)
+    common = (cfg["START_DATE"], cfg["END_DATE"])
+    hw = monitor_cfg["CLIM_HALF_WINDOW_DAYS"]
+    rows: List[Dict[str, Any]] = []
+
+    def add(product, reference, kind, footprint, metric, value, lo, hi, n, d0=None, d1=None):
+        rows.append({"site_id": sid, "product": product, "reference": reference, "segment": kind,
+                     "period": f"{common[0][:4]}-{common[1][:4]}", "subset": footprint, "metric": metric,
+                     "value": value, "ci_low": lo, "ci_high": hi, "n": n,
+                     "date_from": d0, "date_to": d1})
+
+    e = era5_daily.set_index(pd.to_datetime(era5_daily["time"]).dt.floor("D")).sort_index()
+    e = e[~e.index.duplicated(keep="last")].loc[common[0]:common[1]]
+    era_l1, era_rz = e["sm_l1"], rootzone(e)
+
+    # In situ
+    d05 = insitu_daily_depth(0.05, overrides)
+    d20 = insitu_daily_depth(0.20, overrides)["sm"]
+    d30 = insitu_daily_depth(0.30, overrides)["sm"]
+    rz = pd.concat([d20, d30], axis=1).dropna().mean(axis=1)
+
+    # 1. 0-7 cm vs 5 cm: anomalie 35 dni w obrębie segmentu
+    for seg, g in d05.groupby("segment"):
+        a_ins = _moving_anomaly(g["sm"], cfg["ANOMALY_WINDOW_DAYS"], 15)
+        a_era = _moving_anomaly(era_l1, cfg["ANOMALY_WINDOW_DAYS"], 15)
+        p = pd.concat([a_ins.rename("y"), a_era.rename("x")], axis=1).dropna()
+        r, lo, hi = _r_with_ci(pd.Series(p.index), p["x"].to_numpy(), p["y"].to_numpy(), cfg)
+        add("ERA5L_SM_L1", f"ISMN_5cm_{seg}", "anomaly_35d", "ERA5 cell", "pearson_r", r, lo, hi, len(p),
+            p.index.min(), p.index.max())
+
+    # 2. 0-100 cm vs 20-30 cm: anomalie klimatologiczne (wspólny okres) i 35 dni
+    ins_z = clim_anomaly(rz, common, hw, min_n=20)["z"]
+    era_z = clim_anomaly(era_rz, common, hw, min_n=20)["z"]
+    for kind, x_s, y_s in (("anomaly_clim", era_z, ins_z),
+                           ("anomaly_35d", _moving_anomaly(era_rz, cfg["ANOMALY_WINDOW_DAYS"], 15),
+                            _moving_anomaly(rz, cfg["ANOMALY_WINDOW_DAYS"], 15))):
+        p = pd.concat([x_s.rename("x"), y_s.rename("y")], axis=1).dropna()
+        r, lo, hi = _r_with_ci(pd.Series(p.index), p["x"].to_numpy(), p["y"].to_numpy(), cfg)
+        add("ERA5L_SM_RZ", "ISMN_20_30cm", kind, "ERA5 cell", "pearson_r", r, lo, hi, len(p), p.index.min(), p.index.max())
+
+    # 3. Roślinność S-2 vs anomalia 20-30 cm w dniu sceny (sezon wegetacyjny)
+    if len(veg):
+        foot = {f"{sid}_poly": "station plot", sid: f"station buffer {cfg['STATION_BUFFER_M']} m",
+                **{v: f"vineyard {v} (indirect, 136 m)" for v in vineyard_ids}}
+        for (site, prod, idx), g in veg.groupby(["site_id", "product", "index"]):
+            if site not in foot:
+                continue
+            g = g.dropna(subset=["z"]).copy()
+            g["day"] = g["time"].dt.floor("D")
+            p = g.set_index("day")["z"].groupby(level=0).mean().to_frame("x").join(ins_z.rename("y")).dropna()
+            r, lo, hi = _r_with_ci(pd.Series(p.index), p["x"].to_numpy(), p["y"].to_numpy(), cfg)
+            add(f"{prod}_{idx.upper()}", "ISMN_20_30cm", "anomaly_clim", foot[site], "pearson_r", r, lo, hi, len(p),
+                p.index.min() if len(p) else None, p.index.max() if len(p) else None)
+
+    # 4. Wykrywanie susz w dekadach (SMA produktu vs anomalia 20-30 cm)
+    if len(status):
+        st = status.drop_duplicates("date").copy()
+        st["date"] = pd.to_datetime(st["date"])
+        ins_dk = ins_z.groupby(ins_z.index.to_period("D").to_timestamp()).mean()
+        from step_04_metrics_alert import dekad_end
+        tmp = pd.DataFrame({"z": ins_dk.to_numpy(), "dk": dekad_end(pd.Series(ins_dk.index)).to_numpy()})
+        ins_by_dk = tmp.groupby("dk")["z"].mean()
+        j = st.set_index("date").join(ins_by_dk.rename("ins_z"), how="inner").dropna(subset=["ins_z", "sma_rz"])
+        obs = j["ins_z"] <= monitor_cfg["THR_SMA"]
+        prd = j["sma_rz"] <= monitor_cfg["THR_SMA"]
+        hits, misses, fa = int((obs & prd).sum()), int((obs & ~prd).sum()), int((~obs & prd).sum())
+        pod = hits / (hits + misses) if hits + misses else np.nan
+        far = fa / (hits + fa) if hits + fa else np.nan
+        add("ERA5L_SM_RZ<=-1", "ISMN_20_30cm<=-1", "events_dekad", "ERA5 cell", "pod", pod, np.nan, np.nan, len(j))
+        add("ERA5L_SM_RZ<=-1", "ISMN_20_30cm<=-1", "events_dekad", "ERA5 cell", "far", far, np.nan, np.nan, len(j))
+
+    out = pd.DataFrame(rows)
+    for c in ("date_from", "date_to"):
+        out[c] = pd.to_datetime(out[c]).dt.strftime("%Y-%m-%d")
+    return out
 
 
 # ==============================================================================

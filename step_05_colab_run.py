@@ -1,388 +1,43 @@
 """
 ================================================================================
-S-3/S-2 AgriScreen DSS v2.5 - KROK 5: MASTER ORCHESTRATOR
+AgriWatch - KROK 5: STEROWANIE Z NOTATNIKA, REJESTR NA DYSKU I ZADANIA MONITORINGU
 ================================================================================
-Główny moduł sterujący potokiem teledetekcyjnym:
-  1. Weryfikacja środowiska obliczeniowego Google Colab (GPU T4, pamięć RAM).
-  2. Sekwencyjne uruchomienie etapów 1-4 z precyzyjnym profilowaniem czasu:
-     - Krok 1: Ingestia danych satelitarnych GEE i bazy historycznej
-     - Krok 2: Korejestracja subpikselowa AROSICS i deagregacja pyDMS LST 10 m
-     - Krok 3: Super-rozdzielczość SEN2SR i geostatystyczna fuzja ATPRK 2.5 m
-     - Krok 4: Wskaźniki biofizyczne, TVDI, anomalia Z-score i Protokół Walda
-  3. Eksport produktów w formacie Cloud-Optimized GeoTIFF (COG z kompresją LZW):
-     - LST_10m_sharpened.tif
-     - TCARI_OSAVI_2.5m.tif
-     - TVDI_10m.tif
-     - Alert_Matrix_2.5m.tif
-  4. Wygenerowanie ustrukturyzowanego raportu walidacyjnego Markdown:
-     - validation_report.md
+Architektura: kod na GitHub -> obliczenia w Colab -> Dysk Google jako baza danych (tabele gwl_*).
+
+  I.  setup_runtime, run_task, run_history, registry_* — rejestr CSV z kluczem głównym (upsert).
+  II. Konfiguracja monitoringu jednej winnicy (MONITOR_CONFIG) i zadania:
+        task_ingest_s2       rastry Sentinel-2 (step_01, przyrostowo, manifest)
+        task_ingest_era5     ERA5-Land 1991 -> dziś w punkcie winnicy (step_01, cache)
+        task_scene_stats     indeksy obiektów: 10 m oraz SEN2SR 2,5 m z kontrolą H-SR0/H-SR1 (step_03, step_04)
+        task_anomalies       anomalie ERA5 (SMA, SPI) i roślinności + status dekadowy (step_04)
+        task_validate        błąd anomalii na profilu ISMN Condom (step_07)
+        task_bulletin        raport, wykresy i JSON dla geoworldlook.vercel.app (step_04)
+
+Plan i uzasadnienie: docs/plans/Plan_v6_monitoring_anomalii_winnicy.md, docs/evidence/F2_przeglad_literatury.md.
+Poprzednia wersja (potok AgriScreen v2.5): legacy/step_05_colab_run_v1.py.
 ================================================================================
 """
 
-import os
-import sys
+import glob
 import json
-import time
 import logging
-import warnings
+import os
 import subprocess
-from pathlib import Path
+import sys
+import time
 from datetime import datetime, timezone
-from typing import Dict, Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-import rasterio
 
-# Moduły kroków 1-4 są importowane wewnątrz run_pipeline(), żeby sterowanie i rejestr
-# (sekcja IV) działały bez ciężkich zależności (torch, sen2sr, pyDMS).
-
-# Konfiguracja logowania zdarzeń
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("AgriScreen_Orchestrator")
-warnings.filterwarnings("ignore")
+logger = logging.getLogger("AgriWatch_Run")
 
 # ==============================================================================
-# KONFIGURACJA POTOKU (CONFIG)
-# ==============================================================================
-CONFIG: Dict[str, Any] = {
-    # Współrzędne poligonu testowego GBOV Condom (Francja)
-    "LAT": 43.9752,
-    "LON": 0.3376,
-    "TARGET_DATE": "2023-07-15",
-    "BUFFER_M": 2000,
-    "BASELINE_YEARS": (2018, 2025),
-    "GEE_PROJECT": "ee-geoworldlook",
-    "GEOJSON_PATH": "data/1_AOI_GBOV_CONDOM.geojson",
-    "OUTPUT_DIR": "data/05_Final_Outputs",
-    "DOWNLOAD_HISTORICAL": False  # Czy wykonać przyrostowe pobieranie wszystkich scen od 2016
-}
-
-
-# ==============================================================================
-# I. FUNKCJE POMOCNICZE ZAPISU COG (CLOUD-OPTIMIZED GEOTIFF)
-# ==============================================================================
-
-def write_cog_geotiff(
-    data: np.ndarray,
-    profile: dict,
-    output_path: str,
-    nodata_val: float = -9999.0
-) -> None:
-    """
-    Zapisuje macierz 2D NumPy do formatu Cloud-Optimized GeoTIFF (COG)
-    z kafelkowaniem (256x256), kompresją LZW i poprawnym profilem transformacji.
-    """
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    out_prof = profile.copy()
-
-    # Dopasowanie wymiarów danych
-    if len(data.shape) == 2:
-        h, w = data.shape
-        count = 1
-        data_to_write = data[np.newaxis, :, :]
-    else:
-        count, h, w = data.shape
-        data_to_write = data
-
-    dtype_str = 'uint8' if data.dtype == np.uint8 else 'float32'
-
-    out_prof.update({
-        'driver': 'GTiff',
-        'height': h,
-        'width': w,
-        'count': count,
-        'dtype': dtype_str,
-        'tiled': True,
-        'blockxsize': 256,
-        'blockysize': 256,
-        'compress': 'lzw',
-        'nodata': None if dtype_str == 'uint8' else nodata_val
-    })
-
-    # Przygotowanie danych do zapisu (zamiana NaN na nodata)
-    if dtype_str == 'float32':
-        data_to_write = np.nan_to_num(data_to_write, nan=nodata_val).astype(np.float32)
-
-    with rasterio.open(output_path, 'w', **out_prof) as dst:
-        dst.write(data_to_write)
-
-    file_size_kb = os.path.getsize(output_path) / 1024.0
-    logger.info(f"Zapisano COG GeoTIFF: {output_path} ({file_size_kb:.1f} KB, shape: {h}x{w})")
-
-
-# ==============================================================================
-# II. GENEROWANIE RAPORTU WALIDACYJNEGO (MARKDOWN)
-# ==============================================================================
-
-def generate_validation_report(
-    config: dict,
-    runtimes: Dict[str, float],
-    wald_metrics: Dict[str, float],
-    alert_mask: np.ndarray,
-    output_dir: str
-) -> str:
-    """
-    Generuje i zapisuje szczegółowy raport walidacyjny potoku w formacie Markdown.
-    """
-    report_path = os.path.join(output_dir, "validation_report.md")
-
-    total_pixels = alert_mask.size
-    pct_normal = (np.sum(alert_mask == 0) / total_pixels) * 100.0
-    pct_yellow = (np.sum(alert_mask == 1) / total_pixels) * 100.0
-    pct_red = (np.sum(alert_mask == 2) / total_pixels) * 100.0
-    total_time = sum(runtimes.values())
-
-    report_content = f"""# Raport Walidacyjny: S-3/S-2 AgriScreen DSS v2.5
-
-Data wygenerowania: **{time.strftime('%Y-%m-%d %H:%M:%S')}**  
-Cel analizy: **Wczesne wykrywanie anomalii wilgotnościowych i fizjologicznych w uprawach wieloletnich**  
-Obszar badawczy (AOI): **GBOV Condom (Lat: {config['LAT']:.4f}, Lon: {config['LON']:.4f})**  
-Data zobrazowania referencyjnego: **{config['TARGET_DATE']}**  
-Lata bazowe (GEE Baseline): **{config['BASELINE_YEARS'][0]} – {config['BASELINE_YEARS'][1]}**  
-
----
-
-## 1. Profil Czasowy Wykonania Modułów (Runtime Profiling)
-
-| Etap Przetwarzania | Moduł | Czas [s] | Udział [%] |
-| :--- | :--- | :---: | :---: |
-| **Krok 1: Ingestia Danych GEE & Baseline** | `step_01_ingest.py` | {runtimes.get('step_01', 0.0):.2f} | {(runtimes.get('step_01', 0.0)/total_time)*100:.1f}% |
-| **Krok 2: Korejestracja & Downscaling LST** | `step_02_align_and_scale.py` | {runtimes.get('step_02', 0.0):.2f} | {(runtimes.get('step_02', 0.0)/total_time)*100:.1f}% |
-| **Krok 3: SEN2SR (DL) & Fuzja ATPRK** | `step_03_super_resolve.py` | {runtimes.get('step_03', 0.0):.2f} | {(runtimes.get('step_03', 0.0)/total_time)*100:.1f}% |
-| **Krok 4: Wskaźniki, Z-score & Walidacja** | `step_04_metrics_alert.py` | {runtimes.get('step_04', 0.0):.2f} | {(runtimes.get('step_04', 0.0)/total_time)*100:.1f}% |
-| **Krok 5: Zapis COG GeoTIFF & Raport** | `step_05_colab_run.py` | {runtimes.get('step_05', 0.0):.2f} | {(runtimes.get('step_05', 0.0)/total_time)*100:.1f}% |
-| **ŁĄCZNY CZAS WYKONANIA** | — | **{total_time:.2f} s** | **100.0%** |
-
----
-
-## 2. Wyniki Protokołu Walda (Desktopowa Walidacja Dokładności Rekonstrukcji)
-
-Walidacja przeprowadzona na kanale Sentinel-2 B04 (degradacja filtrem Gaussa $\sigma=1.5$, decymacja $\times 4$ do 40 m, super-rozdzielczość z powrotem do 10 m):
-
-| Metryka Walidacyjna | Wartość Uzyskana | Próg Oczekiwany | Status |
-| :--- | :---: | :---: | :---: |
-| **RMSE (Root Mean Square Error)** | **{wald_metrics.get('rmse', 0.0):.4f}** | $< 0.0300$ | {'PASSED' if wald_metrics.get('rmse', 1.0) < 0.03 else 'ACCEPTABLE'} |
-| **SAM (Spectral Angle Mapper)** | **{wald_metrics.get('sam_degrees', 0.0):.2f}°** | $< 12.0°$ | {'PASSED' if wald_metrics.get('sam_degrees', 99.0) < 12.0 else 'ACCEPTABLE'} |
-| **SSIM (Structural Similarity Index)** | **{wald_metrics.get('ssim', 0.0):.4f}** | $> 0.7000$ | {'PASSED' if wald_metrics.get('ssim', 0.0) > 0.70 else 'ACCEPTABLE'} |
-
----
-
-## 3. Statystyka Powierzchniowa Alertów Stresu Upraw (Z-score Anomaly Engine)
-
-Klasyfikacja anomalii Z-score wskaźnika TCARI/OSAVI na siatce super-rozdzielczej 2.5 m:
-
-| Klasa Alertu | Poziom Z-score | Znaczenie Agronomiczne | Udział w AOI [%] |
-| :--- | :---: | :--- | :---: |
-| **0: Norma** | $Z \le 1.5$ | Stan fizjologiczny i wilgotnościowy w normie wieloletniej | **{pct_normal:.2f}%** |
-| **1: Alert Żółty** | $1.5 < Z \le 2.0$ | Podwyższony stres ewapotranspiracyjny / umiarkowana chloroza | **{pct_yellow:.2f}%** |
-| **2: Alert Czerwony** | $Z > 2.0$ | Silny deficyt wodny / ostra chloroza wymagająca nawadniania | **{pct_red:.2f}%** |
-
----
-
-## 4. Wygenerowane Produkty Rastrowe (Cloud-Optimized GeoTIFF)
-
-Wszystkie pliki zostały zapisane w katalogu `{output_dir}` z pełną georeferencją (CRS: EPSG:32631) gotowe do analizy w QGIS:
-1. `LST_10m_sharpened.tif` – Skorygowana topograficznie i zaostrzona temperatura LST w rozdzielczości 10 m.
-2. `TCARI_OSAVI_2.5m.tif` – Wskaźnik chlorozy upraw na siatce super-rozdzielczej 2.5 m (SEN2SR + ATPRK).
-3. `TVDI_10m.tif` – Wskaźnik suszy termicznej TVDI (trójkąt LST-NDVI) w rozdzielczości 10 m.
-4. `Alert_Matrix_2.5m.tif` – Całkowitoliczbowa mapa alertów agronomicznych (klasy 0, 1, 2) w rozdzielczości 2.5 m.
-5. `S2_RGB_10m.tif` / `S2_RGB_TrueColor_10m.tif` – 3-kanałowa kompozycja RGB Sentinel-2 (10 m) do bezpośredniego porównania w QGIS.
-6. `SEN2SR_RGB_2.5m.tif` / `SEN2SR_RGB_TrueColor_2.5m.tif` – 3-kanałowa kompozycja RGB SEN2SR (2.5 m) do bezpośredniego porównania w QGIS.
-7. Poszczególne pasma 2.5 m: `B02_2.5m.tif`, `B03_2.5m.tif`, `B04_2.5m.tif`, `B08_2.5m.tif`, `B05_2.5m.tif`, `LST_2.5m.tif`.
-"""
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write(report_content)
-
-    logger.info(f"Wygenerowano raport walidacyjny: {report_path}")
-    return report_path
-
-
-# ==============================================================================
-# III. GŁÓWNA PĘTLA ORKIESTRATORA: run_pipeline
-# ==============================================================================
-
-def run_pipeline(config: Dict[str, Any] = CONFIG) -> None:
-    """
-    Główna funkcja uruchomieniowa wykonująca sekwencyjnie wszystkie kroki potoku DSS.
-    """
-    from step_01_ingest import ingest_satellite_data
-    from step_02_align_and_scale import align_and_scale_lst
-    from step_03_super_resolve import super_resolve_bands, export_rgb_geotiffs
-    from step_04_metrics_alert import compute_metrics_and_alerts
-
-    logger.info("================================================================================")
-    logger.info("ROZPOCZĘCIE PRZETWARZANIA: S-3/S-2 AgriScreen DSS v2.5")
-    logger.info("================================================================================")
-    logger.info(f"Parametry: Data={config['TARGET_DATE']}, AOI={config['GEOJSON_PATH']}, Bufor={config['BUFFER_M']}m")
-
-    # Automatyczne dostosowanie katalogu wyjściowego i katalogu danych
-    output_dir = config.get("OUTPUT_DIR", "data/05_Final_Outputs")
-    data_dir = config.get("DATA_DIR", os.path.join(config.get("PROJECT_DIR", "."), "data"))
-
-    # Jeśli podano ścieżkę do Dysku Google a nie ma /content/drive, użyj lokalnego katalogu
-    if output_dir.startswith("/content/drive") and not os.path.exists("/content/drive"):
-        logger.warning("Dysk Google nie jest zamontowany. Zmiana OUTPUT_DIR na 'data/05_Final_Outputs'.")
-        output_dir = "data/05_Final_Outputs"
-        data_dir = "data"
-
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(data_dir, exist_ok=True)
-    runtimes: Dict[str, float] = {}
-
-    # --------------------------------------------------------------------------
-    # KROK 1: Ingestia Danych Satelitarnych i Baseline GEE
-    # --------------------------------------------------------------------------
-    t0 = time.time()
-    try:
-        s2_bands, profile_10m, baseline_stats = ingest_satellite_data(
-            lat=config["LAT"],
-            lon=config["LON"],
-            target_date=config["TARGET_DATE"],
-            buffer_m=config["BUFFER_M"],
-            baseline_years=config["BASELINE_YEARS"],
-            geojson_path=config.get("GEOJSON_PATH"),
-            output_base_dir=data_dir,
-            download_historical_series=config.get("DOWNLOAD_HISTORICAL", False),
-            gee_project=config.get("GEE_PROJECT", "ee-geoworldlook"),
-            cdse_client_id=config.get("CDSE_CLIENT_ID"),
-            cdse_client_secret=config.get("CDSE_CLIENT_SECRET")
-        )
-    except Exception as e:
-        logger.error(f"Błąd wykonania Kroku 1 (Ingestia GEE): {e}")
-        logger.info("Przełączanie na tryb awaryjny (weryfikacja lokalnych danych z GeoTIFF)...")
-        # Próba wczytania danych z dysku jeśli zostały wcześniej pobrane
-        s2_path = os.path.join(data_dir, "01_Raw_Sentinel2", f"S2_L2A_{config['TARGET_DATE']}.tif")
-        dem_path = os.path.join(data_dir, "03_Copernicus_Auxiliary", "Copernicus_DEM_GLO30_10m.tif")
-        lst_path = os.path.join(data_dir, "02_Raw_Thermal_LST", f"LST_1km_{config['TARGET_DATE']}.tif")
-
-        if os.path.exists(s2_path) and os.path.exists(dem_path):
-            with rasterio.open(s2_path) as src:
-                s2_arr = src.read().astype(np.float32)
-                profile_10m = src.profile.copy()
-            with rasterio.open(dem_path) as src:
-                dem_arr = src.read(1).astype(np.float32)
-            with rasterio.open(lst_path) as src:
-                lst_raw_arr = src.read(1).astype(np.float32)
-
-            band_names = ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "B12"]
-            s2_bands = {b: s2_arr[i] for i, b in enumerate(band_names)}
-            s2_bands["s3_lst_raw"] = lst_raw_arr
-            s2_bands["dem"] = dem_arr
-            baseline_stats = {
-                "tcari_osavi_mean": np.full_like(dem_arr, 0.15),
-                "tcari_osavi_std": np.full_like(dem_arr, 0.05),
-                "tvdi_mean": np.full_like(dem_arr, 0.50),
-                "tvdi_std": np.full_like(dem_arr, 0.15)
-            }
-        else:
-            raise RuntimeError(f"Krok 1 nie mógł zostać zrealizowany bez połączenia GEE lub danych lokalnych: {e}")
-
-    runtimes["step_01"] = time.time() - t0
-    logger.info(f"Czas wykonania Kroku 1: {runtimes['step_01']:.2f} s")
-
-    # --------------------------------------------------------------------------
-    # KROK 2: Korejestracja i Downscaling LST (1 km -> 10 m)
-    # --------------------------------------------------------------------------
-    t0 = time.time()
-    lst_10m = align_and_scale_lst(
-        s2_bands=s2_bands,
-        s3_lst_raw=s2_bands["s3_lst_raw"],
-        dem=s2_bands["dem"],
-        profile_10m=profile_10m
-    )
-    runtimes["step_02"] = time.time() - t0
-    logger.info(f"Czas wykonania Kroku 2: {runtimes['step_02']:.2f} s")
-
-    # --------------------------------------------------------------------------
-    # KROK 3: Super-Rozdzielczość SEN2SR i Fuzja ATPRK (2.5 m)
-    # --------------------------------------------------------------------------
-    t0 = time.time()
-    bands_25m, profile_25m = super_resolve_bands(
-        s2_bands=s2_bands,
-        lst_10m=lst_10m,
-        profile_10m=profile_10m
-    )
-    runtimes["step_03"] = time.time() - t0
-    logger.info(f"Czas wykonania Kroku 3: {runtimes['step_03']:.2f} s")
-
-    # --------------------------------------------------------------------------
-    # KROK 4: Wskaźniki, Detekcja Anomalii i Protokół Walda
-    # --------------------------------------------------------------------------
-    t0 = time.time()
-    products, wald_metrics = compute_metrics_and_alerts(
-        bands_25m=bands_25m,
-        lst_10m=lst_10m,
-        baseline_stats=baseline_stats,
-        profile_25m=profile_25m
-    )
-    runtimes["step_04"] = time.time() - t0
-    logger.info(f"Czas wykonania Kroku 4: {runtimes['step_04']:.2f} s")
-
-    # --------------------------------------------------------------------------
-    # KROK 5: Eksport Produktów COG GeoTIFF i Raport Walidacyjny
-    # --------------------------------------------------------------------------
-    t0 = time.time()
-    logger.info("Zapisywanie finalnych produktów Cloud-Optimized GeoTIFF...")
-
-    path_lst = os.path.join(output_dir, "LST_10m_sharpened.tif")
-    dir_upscaled = os.path.join(data_dir, "04_Upscaled_LST_10m")
-    os.makedirs(dir_upscaled, exist_ok=True)
-    path_lst_dated = os.path.join(dir_upscaled, f"LST_10m_{config['TARGET_DATE']}.tif")
-
-    path_tcari = os.path.join(output_dir, "TCARI_OSAVI_2.5m.tif")
-    path_tvdi = os.path.join(output_dir, "TVDI_10m.tif")
-    path_alert = os.path.join(output_dir, "Alert_Matrix_2.5m.tif")
-    path_crop = os.path.join(output_dir, "HRL_Crop_Mask_2.5m.tif")
-    path_ppi = os.path.join(output_dir, "HRVPP_PPI_2.5m.tif")
-
-    write_cog_geotiff(lst_10m, profile_10m, path_lst)
-    write_cog_geotiff(lst_10m, profile_10m, path_lst_dated)
-    write_cog_geotiff(products["tcari_osavi_25m"], profile_25m, path_tcari)
-    write_cog_geotiff(products["tvdi_10m"], profile_10m, path_tvdi)
-    write_cog_geotiff(products["alert_mask_25m"], profile_25m, path_alert)
-    if "crop_mask_25m" in products:
-        write_cog_geotiff(products["crop_mask_25m"], profile_25m, path_crop)
-    if "ppi_25m" in products:
-        write_cog_geotiff(products["ppi_25m"], profile_25m, path_ppi)
-
-    # Eksport wielopasmowych i zaostrzonych kompozycji RGB dla porównania w QGIS
-    logger.info("Eksport georeferencyjnych rastrów RGB (10 m vs 2.5 m) dla QGIS...")
-    export_rgb_geotiffs(
-        s2_bands=s2_bands,
-        bands_25m=bands_25m,
-        profile_10m=profile_10m,
-        profile_25m=profile_25m,
-        output_dir=output_dir,
-        target_date=config.get("TARGET_DATE")
-    )
-
-    # Generowanie raportu Markdown
-    report_file = generate_validation_report(
-        config=config,
-        runtimes=runtimes,
-        wald_metrics=wald_metrics,
-        alert_mask=products["alert_mask_25m"],
-        output_dir=output_dir
-    )
-
-    runtimes["step_05"] = time.time() - t0
-
-    logger.info("================================================================================")
-    logger.info("POTOK AgriScreen DSS v2.5 ZAKOŃCZONY PEŁNYM SUKCESEM!")
-    logger.info(f"Wszystkie produkty zapisano w katalogu: {os.path.abspath(output_dir)}")
-    logger.info(f"Raport walidacyjny: {os.path.abspath(report_file)}")
-    logger.info("================================================================================")
-
-
-# ==============================================================================
-# IV. STEROWANIE Z NOTATNIKA I REJESTR NA DYSKU GOOGLE
+# I. STEROWANIE Z NOTATNIKA I REJESTR NA DYSKU GOOGLE
 # ==============================================================================
 # Rejestr = pliki CSV w data/registry/ (w Colab: na Dysku Google). Nazwy tabel i kolumn
-# są nazwami w przyszłej bazie danych, "keys" to klucz główny. Plan: docs/plans/Plan_v3_monitoring_winnic_SR.md (B.6).
+# są nazwami w przyszłej bazie danych, "keys" to klucz główny. Plan: docs/plans/Plan_v6_monitoring_anomalii_winnicy.md.
 #
 # Użycie w notatniku:
 #     rt = setup_runtime(PROJECT_DIR)
@@ -417,6 +72,11 @@ REGISTRY_SCHEMA: Dict[str, Dict[str, List[str]]] = {
         "keys": ["calib_id", "site_id", "product", "orbit", "param"],
         "columns": ["calib_id", "site_id", "product", "orbit", "param", "value", "period_start", "period_end",
                     "run_id"],
+    },
+    "gwl_status": {
+        "keys": ["site_id", "date"],
+        "columns": ["site_id", "date", "cdi_level", "cdi_class", "action", "spi1", "spi3", "sma_rz", "veg_z",
+                    "veg_source", "veg_age_days", "confidence", "reason_codes", "run_id"],
     },
     "gwl_runs": {
         "keys": ["run_id"],
@@ -474,11 +134,18 @@ def setup_runtime(
 
     if install and in_colab:
         import importlib.util
-        needed = {"ee": "earthengine-api", "pytesmo": "pytesmo", "ismn": "ismn"}
+        needed = {"ee": "earthengine-api", "geemap": "geemap", "geedim": "geedim", "rasterio": "rasterio",
+                  "geopandas": "geopandas", "pytesmo": "pytesmo", "ismn": "ismn"}
         missing = [pkg for mod, pkg in needed.items() if importlib.util.find_spec(mod) is None]
         if missing:
             logger.info(f"Instalacja: {' '.join(missing)}")
             subprocess.run([sys.executable, "-m", "pip", "install", "-q", *missing], check=True)
+        # SR jest opcjonalny: błąd instalacji nie zatrzymuje monitoringu (task_scene_stats zgłosi brak SR)
+        sr_missing = [p for p in ("sen2sr", "mlstac") if importlib.util.find_spec(p) is None]
+        if sr_missing:
+            r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", *sr_missing], capture_output=True, text=True)
+            if r.returncode != 0:
+                logger.warning(f"Nie udało się zainstalować {sr_missing}: {r.stderr[-500:]}")
 
     if init_gee:
         from step_01_ingest import initialize_earth_engine
@@ -662,7 +329,419 @@ def registry_summary(rt: Dict[str, Any]) -> pd.DataFrame:
 
 
 # ==============================================================================
-# PUNKT WEJŚCIA PROGRAMU
+# II. MONITORING JEDNEJ WINNICY: KONFIGURACJA I ZADANIA
 # ==============================================================================
+# Ścieżki względne liczone od PROJECT_DIR. Progi statusu = progi EDO CDI (factsheet v4).
+# Rozszerzenie na kolejne winnice: dopisać fid do VINEYARDS (np. {"VINEYARD_06": 6, "VINEYARD_07": 7}).
+
+MONITOR_CONFIG: Dict[str, Any] = {
+    # Obiekty
+    "PARCELS_PATH": "data/1_AOI_GBOV_CONDOM.geojson",
+    "AOI_PATH": "data/1_AOI_GBOV_CONDOM_ZASIEG.geojson",
+    "AOI_BUFFER_M": 320,                  # zapas wokół AOI (SR potrzebuje >= 128 px; brak efektów brzegowych)
+    "VINEYARDS": {"VINEYARD_06": 6},      # winnica 2,9 ha, 136 m od stacji Condom
+    "MAIN_SITE": "VINEYARD_06",
+    "STATION_POLY_FID": 23,
+    "STATION_BUFFER_M": 50,
+    "NETWORK": "SMOSMANIA",
+    "STATION": "Condom",
+    "ISMN_DIR": "data/7_isismn_data",
+    "EPSG": 32631,
+    # Sentinel-2 (rastry jak w v1: 10 pasm + maska chmur, przyrostowo z manifestem)
+    "S2_DIR": "data/01_Raw_Sentinel2",
+    "S2_MANIFEST": "data/00_Metadata/ingest_manifest.json",
+    "S2_START_YEAR": 2016,
+    "S2_CLOUD_MAX_AOI": 40,               # % chmur nad AOI (s2cloudless)
+    "S2_MONTHS": (4, 10),                 # sezon wegetacyjny winorośli; zimą NDVI = okrywa międzyrzędzi
+    # ERA5-Land (seria punktowa: całe AOI to jedno oczko ~9 km)
+    "ERA5_DIR": "data/02_ERA5_Land",
+    "ERA5_START": "1991-01-01",
+    "CLIM_REF": ("1991-01-01", "2020-12-31"),   # okres odniesienia WMO
+    "CLIM_HALF_WINDOW_DAYS": 15,
+    "SPI_DAYS": (30, 90),                 # SPI-1 i SPI-3
+    # Roślinność
+    "VEG_INDEX": "ndvi",
+    "VEG_PRODUCT": "S2_10m",              # produkt do statusu; SR wchodzi tylko, jeśli walidacja pokaże przewagę
+    "VEG_HALF_WINDOW_DAYS": 15,
+    "VEG_MIN_REF": 5,
+    "VEG_MIN_CLEAR_FRAC": 0.9,
+    "VEG_MAX_AGE_DAYS": 30,
+    # Progi statusu (EDO CDI)
+    "THR_SPI1": -2.0, "THR_SPI3": -1.0, "THR_SMA": -1.0, "THR_VEG": -1.0,
+    "STATUS_START": "2016-01-01",
+    # Super-resolution
+    "USE_SR": True,
+    "SR_MODEL_DIR": "data/models/SEN2SRLite_main",
+    "SR_MAX_SCENES_PER_RUN": 150,
+    "SR_MIN_DETAIL_RATIO": 0.02,          # H-SR0: v1 (interpolacja) = 0,005
+    "SR_MAX_CONSISTENCY_RMSE": 0.01,      # H-SR1: reflektancja
+    "SR_DIR": "data/03_SR_2.5m",
+    "SHOWCASE_MONTHS": ["2022-07", "2022-08"],
+    "SHOWCASE_SEASON": 2022,
+    # Wyniki
+    "OUTPUT_DIR": "data/05_Final_Outputs/agriwatch",
+    "BOOTSTRAP_N": 1000,
+}
+
+_PATH_KEYS = ("PARCELS_PATH", "AOI_PATH", "ISMN_DIR", "S2_DIR", "S2_MANIFEST", "ERA5_DIR", "SR_MODEL_DIR",
+              "SR_DIR", "OUTPUT_DIR")
+
+
+def monitor_config(rt: Dict[str, Any], overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """MONITOR_CONFIG z nadpisaniami; ścieżki względne -> bezwzględne względem PROJECT_DIR."""
+    cfg = dict(MONITOR_CONFIG)
+    cfg.update(overrides or {})
+    for k in _PATH_KEYS:
+        if not os.path.isabs(cfg[k]):
+            cfg[k] = os.path.join(rt["PROJECT_DIR"], cfg[k])
+    cfg["PROJECT_DIR"] = rt["PROJECT_DIR"]
+    return cfg
+
+
+def _station_lonlat(cfg: Dict[str, Any]):
+    from step_07_station_pipeline import read_station_metadata
+    m = read_station_metadata(os.path.join(cfg["ISMN_DIR"], cfg["NETWORK"], cfg["STATION"]))
+    return m["lon"], m["lat"]
+
+
+def _main_site_lonlat(cfg: Dict[str, Any]):
+    import geopandas as gpd
+    p = gpd.read_file(cfg["PARCELS_PATH"])
+    g = p.loc[p["fid"] == cfg["VINEYARDS"][cfg["MAIN_SITE"]]].to_crs(cfg["EPSG"]).geometry.centroid
+    c = g.to_crs(4326).iloc[0]
+    return c.x, c.y
+
+
+def _era5_csv(cfg: Dict[str, Any]) -> str:
+    return os.path.join(cfg["ERA5_DIR"], "era5_land_daily.csv")
+
+
+def task_ingest_s2(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Rastry Sentinel-2 dla AOI (step_01.sync_sentinel2_time_series, jak w v1; dodany filtr sezonu)."""
+    import step_01_ingest as s1
+    before = set(glob.glob(os.path.join(cfg["S2_DIR"], "S2_L2A_*.tif")))
+    aoi, _, _ = s1.load_aoi_geometry(cfg["AOI_PATH"], buffer_m=cfg["AOI_BUFFER_M"])
+    s1.sync_sentinel2_time_series(aoi, start_year=cfg["S2_START_YEAR"], output_dir=cfg["S2_DIR"],
+                                  manifest_path=cfg["S2_MANIFEST"], cloud_thresh=cfg["S2_CLOUD_MAX_AOI"],
+                                  epsg_code=cfg["EPSG"], months=cfg["S2_MONTHS"])
+    after = set(glob.glob(os.path.join(cfg["S2_DIR"], "S2_L2A_*.tif")))
+    new = len(after - before)
+    return {"skipped": new == 0, "message": f"{len(after)} scen na Dysku, {new} nowych"}
+
+
+def task_ingest_era5(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """ERA5-Land 1991 -> dziś w punkcie winnicy, przyrostowo (cache fragmentów roku)."""
+    import step_01_ingest as s1
+    lon, lat = _main_site_lonlat(cfg)
+    end = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
+    df = s1.sync_era5_land_point(lat, lon, cfg["ERA5_START"], end, os.path.join(cfg["ERA5_DIR"], "cache"))
+    df.to_csv(_era5_csv(cfg), index=False)
+    return {"message": f"ERA5-Land: {len(df)} dni do {df['time'].max():%Y-%m-%d}"}
+
+
+def _sites_rows(sites, cfg: Dict[str, Any]) -> pd.DataFrame:
+    g = sites.to_crs(4326)
+    c = sites.geometry.centroid.to_crs(4326)
+    return pd.DataFrame({
+        "site_id": sites["site_id"].to_numpy(), "site_type": sites["site_type"].to_numpy(),
+        "name": sites["name"].to_numpy(),
+        "network": [cfg["NETWORK"] if t == "station" else "" for t in sites["site_type"]],
+        "land_use": ["vineyard" if t == "vineyard" else "station plot" for t in sites["site_type"]],
+        "lat": c.y.round(6).to_numpy(), "lon": c.x.round(6).to_numpy(), "geometry_wkt": g.geometry.to_wkt().to_numpy(),
+        "footprint": ["inner pixels (1 px edge removed)" if b else "all pixels" for b in sites["inner_buffer"]],
+        "area_m2": sites.geometry.area.round(1).to_numpy(), "source": "AgriWatch AOI", "updated_at": _utc_now(),
+    })
+
+
+def _stats_to_obs(recs: List[Dict[str, Any]], run_tag: str) -> pd.DataFrame:
+    rows = []
+    for r in recs:
+        for var in ("ndvi", "ndmi", "ndre", "clear_frac"):
+            rows.append({"site_id": r["site_id"], "product": r["product"], "variable": var,
+                         "time_utc": r["time"].strftime("%Y-%m-%dT%H:%M:%SZ"), "orbit": 0, "value": r[var],
+                         "unit": "1", "n_pixels": r["n_pixels"], "qc_flags": r["px_method"], "calib_id": "",
+                         "run_id": run_tag, "ingested_at": _utc_now()})
+    return pd.DataFrame(rows)
+
+
+def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[bool] = None) -> Dict[str, Any]:
+    """
+    Dla każdej nowej sceny: indeksy obiektów z 10 m; jeśli SR włączony — SEN2SR 2,5 m, kontrola H-SR0/H-SR1,
+    indeksy obiektów z 2,5 m tylko dla scen, które przeszły kontrolę. Postęp zapisywany co 25 scen,
+    więc przerwana sesja Colab wznawia się od miejsca przerwania.
+    """
+    import step_01_ingest as s1
+    import step_03_super_resolve as s3
+    import step_04_metrics_alert as s4
+
+    use_sr = cfg["USE_SR"] if use_sr is None else use_sr
+    tag = f"scene_stats_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+    scenes = sorted(glob.glob(os.path.join(cfg["S2_DIR"], "S2_L2A_*.tif")))
+    obs = registry_read(rt, "gwl_observations")
+    done = {p: set(obs.loc[obs["product"] == p, "time_utc"].astype(str)) for p in ("S2_10m", "S2SR_2.5m")}
+    state = {"sites": None, "model": None, "dev": None, "sr_error": None}
+    buf: List[Dict[str, Any]] = []
+    qc: List[Dict[str, Any]] = []
+    n10 = nsr = nsr_ok = 0
+    showcase = set(cfg["SHOWCASE_MONTHS"])
+
+    def flush():
+        if buf:
+            registry_upsert(rt, "gwl_observations", _stats_to_obs(buf, tag))
+            buf.clear()
+        if qc:
+            registry_upsert(rt, "gwl_observations", pd.DataFrame(qc))
+            qc.clear()
+
+    for k, path in enumerate(scenes):
+        t = s4.scene_time(path)
+        tkey = t.strftime("%Y-%m-%dT%H:%M:%SZ")
+        need10 = tkey not in done["S2_10m"]
+        needsr = (use_sr and state["sr_error"] is None and tkey not in done["S2SR_2.5m"]
+                  and nsr < cfg["SR_MAX_SCENES_PER_RUN"])
+        if not (need10 or needsr):
+            continue
+        data, prof = s1.read_geotiff_to_numpy(path)
+        arr, cloud = data[:10], np.nan_to_num(data[s4.RASTER_CLOUD_BAND], nan=1.0)
+        if state["sites"] is None:
+            state["sites"] = s4.load_sites(cfg, prof["crs"], _station_lonlat(cfg))
+        sites = state["sites"]
+        if need10:
+            buf.extend(s4.site_stats(arr, cloud, prof, sites, "S2_10m", t))
+            n10 += 1
+        if needsr:
+            if state["model"] is None:
+                try:
+                    state["model"], state["dev"] = s3.load_sen2sr(cfg["SR_MODEL_DIR"])
+                except Exception as e:
+                    state["sr_error"] = f"{type(e).__name__}: {e}"
+                    logger.error(f"SEN2SR niedostępny — SR pominięty (bez zastępstwa interpolacją): {state['sr_error']}")
+            if state["model"] is not None:
+                arr25 = s3.super_resolve(arr, state["model"], state["dev"])
+                chk = s3.sr_checks(arr, arr25, cfg)
+                nsr += 1
+                for var in ("detail_ratio_min", "consistency_rmse_max", "sr_ok"):
+                    qc.append({"site_id": "AOI", "product": "SR_QC", "variable": var, "time_utc": tkey, "orbit": 0,
+                               "value": float(chk[var]), "unit": "1", "n_pixels": np.nan, "qc_flags": "",
+                               "calib_id": "SEN2SRLite_main", "run_id": tag, "ingested_at": _utc_now()})
+                if chk["sr_ok"]:
+                    nsr_ok += 1
+                    p25 = s3.profile_25m(prof)
+                    c25 = np.repeat(np.repeat(cloud, 4, 0), 4, 1)
+                    buf.extend(s4.site_stats(arr25, c25, p25, sites, "S2SR_2.5m", t))
+                    if t.strftime("%Y-%m") in showcase or k == len(scenes) - 1:
+                        stem = os.path.join(cfg["SR_DIR"], f"{t:%Y%m%d}")
+                        s1.write_geotiff(s4.compute_indices(arr25)["ndvi"], p25, stem + "_NDVI_2.5m.tif")
+                        s1.write_geotiff(s4.compute_indices(arr)["ndvi"], prof, stem + "_NDVI_10m.tif")
+                        s3.plot_sr_comparison(arr, arr25, f"Sentinel-2 {t:%Y-%m-%d}: 10 m vs SEN2SR 2.5 m",
+                                              stem + "_comparison.png", sites, prof)
+                else:
+                    logger.warning(f"{tkey}: SR odrzucony (H-SR0={chk['pass_hsr0']}, H-SR1={chk['pass_hsr1']})")
+        if (n10 + nsr) % 25 == 0:
+            flush()
+    flush()
+    msg = f"10 m: {n10} nowych scen; SR: {nsr} scen, {nsr_ok} przeszło kontrolę"
+    if state["sr_error"]:
+        msg += f"; SR niedostępny: {state['sr_error'][:200]}"
+    reg = {"gwl_sites": _sites_rows(state["sites"], cfg)} if state["sites"] is not None else {}
+    return {"skipped": n10 + nsr == 0, "message": msg, "registry": reg}
+
+
+def _veg_anomalies(rt: Dict[str, Any], cfg: Dict[str, Any]) -> pd.DataFrame:
+    """Anomalie NDVI i NDMI dla każdego obiektu i produktu (10 m, SR 2,5 m) w sezonie S2_MONTHS."""
+    import step_04_metrics_alert as s4
+    cols = ["site_id", "product", "index", "time", "value", "clim_mean", "clim_std", "z", "n_ref"]
+    obs = registry_read(rt, "gwl_observations")
+    obs = obs[obs["product"].isin(["S2_10m", "S2SR_2.5m"])]
+    if obs.empty:
+        return pd.DataFrame(columns=cols)
+    w = obs.pivot_table(index=["site_id", "product", "time_utc"], columns="variable", values="value").reset_index()
+    w["time"] = pd.to_datetime(w["time_utc"]).dt.tz_localize(None)
+    m0, m1 = cfg["S2_MONTHS"]
+    w = w[w["time"].dt.month.between(m0, m1)]
+    parts = []
+    for (site, prod), g in w.groupby(["site_id", "product"]):
+        for idx in ("ndvi", "ndmi"):
+            a = s4.scene_anomaly(g, idx, cfg)
+            if len(a):
+                parts.append(pd.DataFrame({"site_id": site, "product": prod, "index": idx, "time": a["time"].to_numpy(),
+                                           "value": a[idx].to_numpy(), "clim_mean": a["clim_mean"].to_numpy(),
+                                           "clim_std": a["clim_std"].to_numpy(), "z": a["z"].to_numpy(),
+                                           "n_ref": a["n_ref"].to_numpy()}))
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=cols)
+
+
+def task_anomalies(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Anomalie ERA5 (SMA 0-7 i 0-100 cm, SPI-1, SPI-3), anomalie roślinności i status dekadowy."""
+    import step_04_metrics_alert as s4
+    os.makedirs(cfg["OUTPUT_DIR"], exist_ok=True)
+    era5 = pd.read_csv(_era5_csv(cfg), parse_dates=["time"])
+    an = s4.era5_anomalies(era5, cfg)
+    veg = _veg_anomalies(rt, cfg)
+    veg_status = veg[(veg["index"] == cfg["VEG_INDEX"]) & (veg["product"] == cfg["VEG_PRODUCT"])]
+    site_ids = list(cfg["VINEYARDS"]) + [f"{cfg['NETWORK']}_{cfg['STATION']}_poly", f"{cfg['NETWORK']}_{cfg['STATION']}"]
+    status = pd.concat([s4.build_status(an, veg_status, sid, cfg, cfg["STATUS_START"]) for sid in site_ids],
+                       ignore_index=True)
+
+    daily = pd.concat({k: v[[c for c in ("value", "z", "percentile") if c in v]] for k, v in an.items()}, axis=1)
+    daily.to_csv(os.path.join(cfg["OUTPUT_DIR"], "era5_daily_anomalies.csv"))
+    veg.to_csv(os.path.join(cfg["OUTPUT_DIR"], "veg_anomalies.csv"), index=False)
+    status.to_csv(os.path.join(cfg["OUTPUT_DIR"], "status_dekads.csv"), index=False)
+
+    clim_id = f"{cfg['CLIM_REF'][0][:4]}-{cfg['CLIM_REF'][1][:4]}_doy{cfg['CLIM_HALF_WINDOW_DAYS']}"
+    rows = []
+    for name, d in an.items():
+        d = d.loc[cfg["STATUS_START"]:].copy()
+        d["dk"] = s4.dekad_end(pd.Series(d.index)).to_numpy()
+        for c in ("clim_mean", "percentile"):
+            if c not in d:
+                d[c] = np.nan
+        agg = d.groupby("dk")[["value", "z", "clim_mean", "percentile"]].mean()
+        for dk, r in agg.iterrows():
+            rows.append({"site_id": "AOI_ERA5L", "product": name, "date": dk.strftime("%Y-%m-%d"),
+                         "value": r["value"], "clim_mean": r["clim_mean"], "z": r["z"],
+                         "percentile": r["percentile"], "clim_id": clim_id})
+    veg_clim = f"other_years_doy{cfg['VEG_HALF_WINDOW_DAYS']}"
+    for r in veg.itertuples():
+        rows.append({"site_id": r.site_id, "product": f"{r.product}_{r.index.upper()}",
+                     "date": pd.Timestamp(r.time).strftime("%Y-%m-%d"), "value": r.value,
+                     "clim_mean": r.clim_mean, "z": r.z, "clim_id": veg_clim})
+    anomalies = pd.DataFrame(rows).drop_duplicates(["site_id", "product", "date"], keep="last")
+    cur = status[status["site_id"] == cfg["MAIN_SITE"]].iloc[-1]
+    return {"message": f"{cfg['MAIN_SITE']} {cur['date']}: {cur['cdi_class']} ({cur['reason_codes']})",
+            "registry": {"gwl_anomalies": anomalies, "gwl_status": status}}
+
+
+def task_validate(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Błąd anomalii względem profilu glebowego ISMN Condom (step_07.validate_anomalies)."""
+    import step_07_station_pipeline as s7
+    era5 = pd.read_csv(_era5_csv(cfg), parse_dates=["time"])
+    veg = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "veg_anomalies.csv"), parse_dates=["time"])
+    status = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "status_dekads.csv"))
+    overrides = {"PROJECT_DIR": cfg["PROJECT_DIR"], "NETWORK": cfg["NETWORK"], "STATION": cfg["STATION"],
+                 "BOOTSTRAP_N": cfg["BOOTSTRAP_N"], "STATION_BUFFER_M": cfg["STATION_BUFFER_M"]}
+    val = s7.validate_anomalies(era5, veg, status, overrides, cfg, list(cfg["VINEYARDS"]))
+    val.to_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_anomalies.csv"), index=False)
+    best = val[(val["product"] == "ERA5L_SM_RZ") & (val["segment"] == "anomaly_clim")]
+    msg = f"{len(val)} metryk" + (f"; R anomalii 0-100 cm vs 20-30 cm = {best['value'].iat[0]:.2f}" if len(best) else "")
+    return {"message": msg, "registry": {"gwl_validation_metrics": val}}
+
+
+def task_bulletin(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Biuletyn dla winnicy: bulletin.md, wykresy, agriwatch_latest.json (do publikacji na stronie)."""
+    import step_04_metrics_alert as s4
+    status = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "status_dekads.csv"))
+    veg = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "veg_anomalies.csv"), parse_dates=["time"])
+    vpath = os.path.join(cfg["OUTPUT_DIR"], "validation_anomalies.csv")
+    val = pd.read_csv(vpath) if os.path.exists(vpath) else pd.DataFrame()
+    sites = registry_read(rt, "gwl_sites")
+    s = sites[sites["site_id"] == cfg["MAIN_SITE"]]
+    site = s.iloc[0].to_dict() if len(s) else {"site_id": cfg["MAIN_SITE"], "name": cfg["MAIN_SITE"]}
+    veg_main = veg[veg["index"] == cfg["VEG_INDEX"]] if len(veg) else veg
+    paths = s4.build_bulletin(status, veg_main, val, site, cfg, cfg["OUTPUT_DIR"])
+    return {"message": ", ".join(os.path.relpath(p, cfg["PROJECT_DIR"]) for p in paths.values())}
+
+
+def run_monitoring(rt: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None, ingest: bool = True) -> None:
+    """Wszystkie zadania po kolei (każde zapisane w gwl_runs; błąd jednego nie zatrzymuje kolejnych)."""
+    cfg = cfg or monitor_config(rt)
+    if ingest:
+        run_task(rt, "ingest_s2", task_ingest_s2, rt, cfg)
+        run_task(rt, "ingest_era5", task_ingest_era5, rt, cfg)
+    run_task(rt, "scene_stats", task_scene_stats, rt, cfg)
+    run_task(rt, "anomalies", task_anomalies, rt, cfg)
+    run_task(rt, "validate", task_validate, rt, cfg)
+    run_task(rt, "bulletin", task_bulletin, rt, cfg)
+
+
+# ==============================================================================
+# III. TEST OFFLINE (bez GEE i bez GPU): syntetyczne rastry i ERA5 + prawdziwe dane ISMN i działki
+# ==============================================================================
+
+def _selftest(out_dir: str) -> None:
+    import shutil
+    import geopandas as gpd
+    from rasterio.transform import from_origin
+    import step_01_ingest as s1
+    import step_03_super_resolve as s3
+
+    project = os.path.dirname(os.path.abspath(__file__))
+    shutil.rmtree(out_dir, ignore_errors=True)
+    rt = {"PROJECT_DIR": project, "REGISTRY_DIR": os.path.join(out_dir, "registry"), "GIT_COMMIT": "selftest"}
+    cfg = monitor_config(rt, {"S2_DIR": os.path.join(out_dir, "s2"), "ERA5_DIR": os.path.join(out_dir, "era5"),
+                              "OUTPUT_DIR": os.path.join(out_dir, "out"), "SR_DIR": os.path.join(out_dir, "sr"),
+                              "BOOTSTRAP_N": 200, "USE_SR": False})
+    rng = np.random.default_rng(1)
+
+    # Syntetyczne ERA5-Land 1991-2024: cykl roczny + szum AR(1); opad gamma
+    days = pd.date_range("1991-01-01", "2024-12-31", freq="D")
+    doy = days.dayofyear.to_numpy()
+    seas = np.cos(2 * np.pi * (doy - 30) / 365.25)
+    ar = np.zeros(len(days))
+    for i in range(1, len(days)):
+        ar[i] = 0.97 * ar[i - 1] + rng.normal(0, 0.01)
+    era5 = pd.DataFrame({"time": days, "sm_l1": 0.25 + 0.08 * seas + ar, "sm_l2": 0.27 + 0.06 * seas + 0.8 * ar,
+                         "sm_l3": 0.30 + 0.04 * seas + 0.6 * ar, "precip_mm": rng.gamma(0.4, 6.0, len(days)),
+                         "t2m_min_c": 8 - 6 * seas, "t2m_c": 13 - 7 * seas})
+    os.makedirs(cfg["ERA5_DIR"], exist_ok=True)
+    era5.to_csv(_era5_csv(cfg), index=False)
+    ar_s = pd.Series(ar, index=days)
+
+    # Syntetyczne sceny S-2 (12 pasm jak w step_01) na siatce obejmującej winnicę i stację
+    parcels = gpd.read_file(cfg["PARCELS_PATH"]).to_crs(cfg["EPSG"])
+    x0, y0, x1, y1 = parcels.total_bounds
+    x0, y1 = np.floor(x0 / 10) * 10 - 200, np.ceil(y1 / 10) * 10 + 200
+    w, h = int((x1 - x0 + 400) / 10) + 1, int((y1 - y0 + 400) / 10) + 1
+    prof = {"driver": "GTiff", "crs": f"EPSG:{cfg['EPSG']}", "transform": from_origin(x0, y1, 10, 10),
+            "width": w, "height": h, "count": 12, "dtype": "float32"}
+    os.makedirs(cfg["S2_DIR"], exist_ok=True)
+    for year in range(2016, 2025):
+        for month in range(4, 11):
+            for day in (5, 20):
+                t = pd.Timestamp(year=year, month=month, day=day, hour=10, minute=50)
+                anom = float(ar_s.loc[t.normalize()])
+                ndvi_target = 0.35 + 0.25 * np.sin(np.pi * (t.dayofyear - 90) / 200) + 2.0 * anom
+                red = np.full((h, w), 0.08) + rng.normal(0, 0.005, (h, w))
+                nir = red * (1 + ndvi_target) / (1 - ndvi_target)
+                arr = np.stack([red * 0.8, red * 0.9, red, red * 1.5, nir * 0.7, nir * 0.9, nir, nir,
+                                np.full((h, w), 0.25 - anom), np.full((h, w), 0.18 - anom),
+                                np.zeros((h, w)), np.full((h, w), 4.0)]).astype("float32")
+                s1.write_geotiff(arr, prof, os.path.join(cfg["S2_DIR"], f"S2_L2A_{t:%Y%m%d_%H%M%S}.tif"))
+
+    # Kontrola SR bez modelu: interpolacja ma być odrzucona (H-SR0), SR ze szczegółem i spójny — przyjęty
+    lo = np.stack([np.clip(rng.normal(0.1, 0.03, (64, 64)), 0.01, 1) for _ in range(10)]).astype("float32")
+    fake_interp = s3.bicubic_upsample(lo)
+    detail = rng.normal(0, 0.02, fake_interp.shape)
+    fake_sr = (np.repeat(np.repeat(lo, 4, 1), 4, 2) + detail
+               - np.repeat(np.repeat(s3.block_mean(detail), 4, 1), 4, 2)).astype("float32")
+    assert not s3.sr_checks(lo, fake_interp, cfg)["pass_hsr0"], "Interpolacja nie może przejść H-SR0"
+    chk = s3.sr_checks(lo, fake_sr, cfg)
+    assert chk["sr_ok"], chk
+    print("[OK] Kontrola SR: interpolacja odrzucona, spójny SR przyjęty.")
+
+    for name, fn in (("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
+                     ("validate", task_validate), ("bulletin", task_bulletin)):
+        run_task(rt, name, fn, rt, cfg, raise_errors=True)
+    res = run_task(rt, "scene_stats_repeat", task_scene_stats, rt, cfg, raise_errors=True)
+    assert res["skipped"], "Drugie uruchomienie nie powinno przetwarzać scen ponownie"
+
+    st = registry_read(rt, "gwl_status")
+    assert "VINEYARD_06" in set(st["site_id"]) and st["cdi_class"].notna().all()
+    val = registry_read(rt, "gwl_validation_metrics")
+    assert len(val) >= 5, val
+    with open(os.path.join(cfg["OUTPUT_DIR"], "agriwatch_latest.json"), encoding="utf-8") as f:
+        js = json.load(f)
+    assert js["current"]["cdi_class"] in ("normal", "watch", "warning", "alert", "recovery")
+    print("[OK] Selftest monitoringu. Status:", js["current"]["date"], js["current"]["cdi_class"])
+    print(val[["product", "reference", "segment", "subset", "metric", "value", "n"]].round(3).to_string(index=False))
+
+
 if __name__ == "__main__":
-    run_pipeline(CONFIG)
+    import argparse
+    ap = argparse.ArgumentParser(description="AgriWatch: test offline monitoringu")
+    ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--out", default="data/_selftest_monitor")
+    a = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    if a.selftest:
+        _selftest(a.out)
