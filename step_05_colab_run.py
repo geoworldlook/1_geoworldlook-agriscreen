@@ -488,8 +488,8 @@ def sr_coverage(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, int]:
         if m0 <= t.month <= m1:
             keys.add(t.strftime("%Y-%m-%dT%H:%M:%SZ"))
     obs = registry_read(rt, "gwl_observations")
-    done = _sr_qc_done(obs)
     ok = set(obs.loc[(obs["product"] == "S2SR_2.5m") & (obs["variable"] == "ndvi"), "time_utc"].astype(str))
+    done = _sr_qc_done(obs) | ok        # przyjęte wcześniejszą wersją kontroli nie są przeliczane
     return {"scenes": len(keys), "sr_done": len(keys & done), "sr_ok": len(keys & ok),
             "remaining": len(keys - done)}
 
