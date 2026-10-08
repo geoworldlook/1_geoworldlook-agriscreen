@@ -1,0 +1,160 @@
+{
+ "meta": {
+  "V0_a0.25": {
+   "variant": "V0",
+   "alpha": 0.25
+  },
+  "V0_a1.0": {
+   "variant": "V0",
+   "alpha": 1.0
+  },
+  "V0_a2.0": {
+   "variant": "V0",
+   "alpha": 2.0
+  },
+  "V0_a4.0": {
+   "variant": "V0",
+   "alpha": 4.0
+  },
+  "V1": {
+   "variant": "V1",
+   "obs": "S1_seasonal",
+   "h_row": 0,
+   "alpha": 4.0,
+   "R": 0.0016456604533462477,
+   "param": null,
+   "matched_V0": "V0_a4.0"
+  },
+  "V3": {
+   "variant": "V3",
+   "obs": "E5L1_s1days",
+   "h_row": 0,
+   "alpha": 0.25,
+   "R": 5.965179988987591e-05,
+   "param": null,
+   "matched_V0": "V0_a0.25"
+  },
+  "V4": {
+   "variant": "V4",
+   "obs": "SWI",
+   "h_row": 1,
+   "alpha": 2.0,
+   "R": 8.172567313466405e-05,
+   "param": null,
+   "matched_V0": "V0_a2.0"
+  },
+  "V1cdf": {
+   "variant": "V1cdf",
+   "obs": "S1_cdf",
+   "h_row": 0,
+   "alpha": 2.0,
+   "R": 0.004987219578599309,
+   "param": null,
+   "matched_V0": "V0_a2.0"
+  },
+  "V3d": {
+   "variant": "V3d",
+   "obs": "E5L1_daily",
+   "h_row": 0,
+   "alpha": 1.0,
+   "R": 5.315629064388778e-05,
+   "param": null,
+   "matched_V0": "V0_a1.0"
+  },
+  "V2_p0.30": {
+   "variant": "V2_p0.30",
+   "obs": "S1_seasonal",
+   "h_row": 0,
+   "alpha": 4.0,
+   "R": 0.0016456604533462477,
+   "param": {
+    "mean": 0.3
+   },
+   "matched_V0": "V0_a4.0"
+  },
+  "V2_p0.36": {
+   "variant": "V2_p0.36",
+   "obs": "S1_seasonal",
+   "h_row": 0,
+   "alpha": 4.0,
+   "R": 0.0016456604533462477,
+   "param": {
+    "mean": 0.36
+   },
+   "matched_V0": "V0_a4.0"
+  },
+  "V2_p0.42": {
+   "variant": "V2_p0.42",
+   "obs": "S1_seasonal",
+   "h_row": 0,
+   "alpha": 4.0,
+   "R": 0.0016456604533462477,
+   "param": {
+    "mean": 0.42
+   },
+   "matched_V0": "V0_a4.0"
+  },
+  "V1star": {
+   "variant": "V1star",
+   "alpha": 2.0,
+   "R": 0.0064,
+   "obs": "S1_seasonal",
+   "matched_V0": "V0_a2.0"
+  }
+ },
+ "T_swi": 15.0,
+ "tuned": {
+  "S1_seasonal": {
+   "alpha": 4.0,
+   "R": 0.0016456604533462477
+  },
+  "S1_cdf": {
+   "alpha": 2.0,
+   "R": 0.004987219578599309
+  },
+  "E5L1_s1days": {
+   "alpha": 0.25,
+   "R": 5.965179988987591e-05
+  },
+  "E5L1_daily": {
+   "alpha": 1.0,
+   "R": 5.315629064388778e-05
+  },
+  "SWI": {
+   "alpha": 2.0,
+   "R": 8.172567313466405e-05
+  }
+ },
+ "swi_grid": [
+  {
+   "T": 5,
+   "R_train": 0.46763747724286653,
+   "n": 1630
+  },
+  {
+   "T": 10,
+   "R_train": 0.5026634724844159,
+   "n": 1630
+  },
+  {
+   "T": 15,
+   "R_train": 0.5077938289980639,
+   "n": 1630
+  },
+  {
+   "T": 20,
+   "R_train": 0.5053755532066317,
+   "n": 1630
+  },
+  {
+   "T": 30,
+   "R_train": 0.49881215738644546,
+   "n": 1630
+  },
+  {
+   "T": 40,
+   "R_train": 0.49605744185091366,
+   "n": 1630
+  }
+ ]
+}

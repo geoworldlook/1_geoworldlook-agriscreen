@@ -16,6 +16,7 @@ a potem był sprawdzany przez niezależnego recenzenta, który powtarzał oblicz
 | `R1_bilans_wodny_prototyp/` | prototyp dwuskładnikowego bilansu (winorośl + międzyrzędzie), termin wejścia w suszę | bez osobnej recenzji — traktować jako hipotezę |
 | `R2_orbita_fenologia/` | błąd orbit, klimatologia harmoniczna | błąd orbit potwierdzony własnym skryptem (`weryfikacja_wlasna/`) |
 | `R3_gleba/`, `R4_statystyka/` | analizy pomocnicze (efektywne n, placebo, kalibracja progów, mróz 2022) | kalibracja progów potwierdzona własnym skryptem |
+| `D_asymilacja_EnKF/` | EnKF (100 członków) z Sentinel-1 w 2-warstwowym modelu na stacji Condom; rekalibracja parametru; prawdopodobieństwo P(z ≤ −1), Brier, niezawodność. Opis: `docs/evidence/F5_asymilacja_danych.md` | bez osobnej recenzji; testy: bilans wody zamknięty do 1e-13 mm, zgodność z dokładnym filtrem Kalmana w przypadku liniowym |
 | `weryfikacja_wlasna/` | moja kontrola: orbita, klimatologia przyczynowa, kalibracja z | — |
 | `wyniki_workflow.json` | pełne wyniki: 4 przeglądy literatury, 3 eksperymenty, 3 recenzje | — |
 | `zrodla_przeglad.txt` | lista źródeł z poziomem dostępu (fulltext / abstract / snippet / own_knowledge_unverified) | — |

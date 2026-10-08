@@ -54,8 +54,11 @@ Dokładanie kolejnych wskaźników spektralnych nie spełnia żadnego z tych war
 | A4 | ISMN: flaga QC-4 (utrata kontaktu) i flaga „dno czujnika” w `qc_insitu`; 5 cm wyłączone z walidacji klimatologicznej (wymiana czujnika 2019) | raport walidacji podaje dni odrzucone przez QC |
 | A5 | Protokół walidacji v1.1 w kodzie (`validate_anomalies`): sparowane ΔR z blokiem = sezon, efektywne n, korelacja cząstkowa przy danym ERA5, test placebo (tasowanie lat), raport sezonowy XI–III / IV–X / VII–X, wiersz ERA5 7–28 cm, warianty wybierane walidacją krzyżową „zostaw rok” na 2016–2023 i potwierdzane na 2024 (+2025–2026 tam, gdzie jest referencja), korekta Holma przy wielu wariantach | warianty wchodzą do statusu tylko przy sparowanej przewadze lub równoważności (±0,05) z inną zaletą |
 | A6 | Dashboard i README: liczby operacyjne z CI, dopiski (warstwa ERA5 dla POD/FAR, n dekad, pośredniość 136 m), zdanie o braku walidacji alarmu na danych z winnicy; próg zdarzeń gleby −1,2 zamiast −1 do rozważenia (obciążenie częstości 1,34 → 0,96) tylko jeśli przejdzie A5 | opisy zgodne z `run_summary.md` |
+| A7 | **PSMA — probabilistyczna anomalia wilgotności** (filtr Kalmana na anomaliach, `docs/evidence/F5_asymilacja_danych.md` §5): ostrzeżenie z prawdopodobieństwa `p = P(x ≤ −1 \| dane)` z przedziałem niepewności zamiast progu z ≤ −1; wejście p ≥ 0,5, utrzymanie p ≥ 0,35. Na start jedno źródło (ERA5-Land), parametry z etapu B | Brier lepszy niż reguła tak/nie (w eksperymencie 0,141 → 0,103); diagram niezawodności bez systematycznego odchylenia |
 
 Status logiki EDO zostaje. NDVI zostaje jako warstwa „skutku” (jak fAPAR w EDO), po poprawkach A1–A3.
+FAR ≈ 0,57 obecnej reguły to granica wynikająca z korelacji ERA5 z czujnikiem (r = 0,58 daje oczekiwany FAR 0,56), nie błąd progu —
+dlatego A7 zamienia próg na prawdopodobieństwo.
 
 ### Etap B — walidacja wielostanowiskowa warstwy gleby (ok. 4 dni; GEE w Colab)
 
@@ -64,6 +67,9 @@ Status logiki EDO zostaje. NDVI zostaje jako warstwa „skutku” (jak fAPAR w E
 - Trzecie niezależne źródło do potrójnej kolokacji: SMAP L4 (jest w katalogu GEE). Opcjonalnie Météo-France SIM2 (8 km, otwarte dane) jako niezależny model.
 - Kryteria: mediana R ≥ 0,50; ≥ 70% stacji z dolnym CI > 0,30.
 - Dopiero tu można rozstrzygnąć: warstwa 0–100 vs 7–28 cm, fuzja z Sentinel-1, próg −1 vs −1,2.
+- Produkty z asymilacją danych jako kandydaci na członków PSMA (A7): **SMAP L4** (EnKF, GEE `NASA/SMAP/SPL4SMGP/008`)
+  i **H SAF H145/H146** (SEKF z ASCAT, te same warstwy co ERA5-Land). Członek wchodzi tylko przy sparowanej poprawie Brier (korekta Holma).
+- Parametry PSMA (ρ każdego źródła) z rozszerzonej potrójnej kolokacji na wszystkich stacjach, nie strojone na Condom.
 
 ### Etap C — warstwa winnicy w jednostkach winorośli (ok. 15 dni; po A i B)
 
@@ -75,6 +81,11 @@ Status logiki EDO zostaje. NDVI zostaje jako warstwa „skutku” (jak fAPAR w E
 - **C3. Atrybuty działek z IGN BD ORTHO 20 cm (IRC, licencja Etalab):** rozstaw i azymut rzędów, udział okrywy winorośli, typ międzyrzędzia. Służą C2 i A2. SR 2,5 m nie rozdziela rzędów rozstawionych co 2,2–3 m.
 - **C4. Wyjście:** FTSW, współczynnik stresu Ks, deficyt w mm, anomalia FTSW, dni do stresu.
   Status: ostrzeżenie = gleba; nowe pole `vine_stress` = model; alarm = `vine_stress` ∧ obserwowana anomalia S-2.
+- **C5. Wersja zespołowa z asymilacją (cykl prognoza → przelot satelity → korekta):** 100 przebiegów bilansu z zaburzonym deszczem,
+  ET0 i TAW; EnKF aktualizuje stan przy każdym przelocie S-1 (osobna klimatologia dla każdej orbity); TAW dopasowywane raz w roku
+  wsadowo (ES-MDA), nie przez dryf w filtrze; wynik `P(FTSW ≤ 0,4)` i „dni do stresu” z 7-dniowej prognozy zespołowej.
+  Eksperyment F5: EnKF z S-1 na stacji nie poprawił R (ΔR −0,024 [−0,09; +0,05]), a rekalibracja parametru nie zbiegła w 9 lat —
+  przyjmujemy C5 tylko, jeśli na wielu stacjach nie jest gorszy od przebiegu bez asymilacji.
 - Uczciwie: C nie podniesie R względem czujnika ISMN (ustalenie 11). Wartość to jednostki fizyczne, termin (ustalenie 12, hipoteza)
   i różnicowanie działek przez TAW i wigor. Dowód musi przyjść z etapu D.
 
@@ -84,6 +95,8 @@ Status logiki EDO zostaje. NDVI zostaje jako warstwa „skutku” (jak fAPAR w E
 - **D2. Obserwacje ApeX** (wzrost wierzchołków pędów, darmowa aplikacja IFV/INRAE) co tydzień VI–VIII na 3–5 działkach.
 - **D3. Opcjonalnie potencjał wodny przedświtowy** (komora ciśnieniowa) na 3–5 działkach — kalibracja TTSW w C2.
 - Kryterium: korelacja Spearmana ρ ≥ 0,52 (n = 15, α = 0,05) między sezonową anomalią / FTSW a δ13C.
+- Obserwacje ApeX służą też jako **obserwacje asymilowane** w C5: tylko obserwacja stanu winorośli czyni TAW działki identyfikowalnym
+  (TTSW z błędem ~30 mm z ApeX + pogody + S-2; Zhang, Pichon, Roux 2025). Z samego S-1 parametr się nie uczy (F5 §4).
 - Wymaga partnera w terenie (winiarz, spółdzielnia, Chambre d'agriculture du Gers lub IFV). To także kontakt zawodowy.
 
 ### Kolejność i nakład
@@ -114,6 +127,9 @@ Status logiki EDO zostaje. NDVI zostaje jako warstwa „skutku” (jak fAPAR w E
 - D-042: Ostrzeżenie zostaje na ERA5-Land 0–100 cm do czasu etapu B.
 - D-043: S-2 w bilansie wodnym tylko jako parametr strukturalny.
 - D-044: Alarm walidujemy na stanie wodnym winorośli (etap D); do tego czasu opisujemy go jako niezwalidowany.
+- D-045: Ostrzeżenie o glebie wyrażamy jako prawdopodobieństwo (PSMA, A7) z przedziałem niepewności, weryfikowane Brierem i diagramem niezawodności.
+- D-046: Produkty z asymilacją (SMAP L4, H SAF) testujemy jako członków PSMA w etapie B; własną asymilację (C5) budujemy dopiero po B.
+- D-047: Parametrów gleby nie kalibrujemy z S-1; kalibracja TAW wymaga obserwacji winorośli (ApeX, etap D).
 
 ## 6. Najważniejsze źródła
 
