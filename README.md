@@ -55,6 +55,8 @@ Jedna winnica (`VINEYARD_06`), status EDO z SPI, wilgotności gleby ERA5-Land i 
 Do wydania zmieniamy tylko błędy, nie metodę. NDMI, NDRE i CRSWIR liczą się w tle do walidacji.
 Propozycje rozwoju (Z1–Z15, 15 winnic, strona WWW, powiadomienia) czekają na wersję 1.1:
 `docs/plans/Plan_v6_platforma_anomalii_wilgotnosci.md`, `docs/evidence/F3_przeglad_literatury_platforma.md`.
+Plan precyzji v1.1 (poprawki statystyki anomalii, walidacja wielostanowiskowa, bilans wodny winorośli):
+`docs/plans/Plan_v7_precyzja.md`, dowody w `docs/evidence/F4_eksperymenty/`.
 
 Testy offline (bez GEE i GPU; prawdziwe dane ISMN i działki, syntetyczne dane satelitarne):
 
