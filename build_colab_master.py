@@ -27,7 +27,13 @@ if IN_COLAB:
     if not os.path.exists(os.path.join(PROJECT_DIR, '.git')):
         os.makedirs(os.path.dirname(PROJECT_DIR), exist_ok=True)
         !git clone {REPO_URL} "{PROJECT_DIR}"
+    # Lokalne zmiany w kodzie (np. zapisany notatnik) blokowały `pull --ff-only` i kod zostawał stary:
+    # odkładamy je do stash (do odzyskania: git stash list / git stash pop), potem pull.
+    !git -C "{PROJECT_DIR}" stash push -q -m "colab-autostash" || true
     !git -C "{PROJECT_DIR}" pull --ff-only
+    !git -C "{PROJECT_DIR}" log -1 --format="Kod: %h %ci %s"
+    if os.popen(f'git -C "{PROJECT_DIR}" rev-parse HEAD').read() != os.popen(f'git -C "{PROJECT_DIR}" rev-parse origin/main').read():
+        print('[UWAGA] Kod na Dysku różni się od origin/main — wyniki będą z innej wersji kodu.')
 else:
     PROJECT_DIR = os.path.abspath('..') if os.path.basename(os.getcwd()) == 'notebooks' else os.path.abspath('.')
 os.chdir(PROJECT_DIR)

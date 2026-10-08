@@ -130,6 +130,9 @@ def setup_runtime(
     in_colab = "google.colab" in sys.modules
 
     if pull and os.path.exists(os.path.join(project_dir, ".git")):
+        # lokalne zmiany blokują pull --ff-only; stash je zachowuje (git stash list)
+        if _git(project_dir, "status", "--porcelain", "--untracked-files=no"):
+            logger.info(f"git stash: {_git(project_dir, 'stash', 'push', '-m', 'colab-autostash')}")
         logger.info(f"git pull: {_git(project_dir, 'pull', '--ff-only')}")
 
     if install and in_colab:
