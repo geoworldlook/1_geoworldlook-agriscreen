@@ -16,6 +16,7 @@ legacy/step_01_ingest_v1.py.
 
 from __future__ import annotations
 
+import glob
 import json
 import logging
 import os
@@ -399,6 +400,10 @@ def sync_era5_land_point(
             logger.info(f"ERA5-Land: pobieranie {a:%Y-%m-%d} -> {b:%Y-%m-%d}")
             df = fetch_era5_land_daily(lat, lon, f"{a:%Y-%m-%d}", f"{b:%Y-%m-%d}")
             df.to_csv(path, index=False)
+            # bieżący fragment kończy się "jutro", więc co dzień ma inną nazwę: starsze wersje są zbędne
+            for old in glob.glob(os.path.join(cache_dir, f"era5land_{a:%Y%m%d}_*.csv")):
+                if os.path.abspath(old) != os.path.abspath(path):
+                    os.remove(old)
             frames.append(df)
         a = b
     frames = [f for f in frames if not f.empty]
