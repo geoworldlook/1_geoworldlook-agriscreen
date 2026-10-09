@@ -66,7 +66,7 @@ STATION_CONFIG: Dict[str, Any] = {
     "GEE_PROJECT": "ee-geoworldlook",
 
     "START_DATE": "2016-01-01",
-    "END_DATE": "2024-12-31",
+    "END_DATE": "auto",          # "auto" = ostatni dzień w plikach ISMN (data końcowa z nazwy pliku .stm)
     "DEPTH_M": 0.05,                 # warstwa powierzchniowa porównywalna z S-1
     "STATION_BUFFER_M": 50,          # promień bufora wokół stacji (S-1 wymaga wielu pikseli)
 
@@ -106,6 +106,19 @@ STATION_CONFIG: Dict[str, Any] = {
 }
 
 
+def ismn_end_date(station_dir: str) -> str:
+    """
+    Koniec okresu danych ISMN z nazw plików (…_RRRRMMDD_RRRRMMDD.stm; data końcowa jest wyłączna).
+    Nowe pliki pobrane z ismn.earth wydłużają walidację bez zmian w kodzie. Brak plików = dziś.
+    """
+    ends = []
+    for p in glob.glob(os.path.join(station_dir, "*_sm_*.stm")):
+        m = re.search(r"_(\d{8})_(\d{8})\.stm$", os.path.basename(p))
+        if m:
+            ends.append(pd.Timestamp(m.group(2)) - pd.Timedelta(days=1))
+    return (max(ends) if ends else pd.Timestamp.now().normalize()).strftime("%Y-%m-%d")
+
+
 def build_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Łączy konfigurację domyślną z nadpisaniami i rozwiązuje ścieżki względne."""
     cfg = dict(STATION_CONFIG)
@@ -116,6 +129,8 @@ def build_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not os.path.isabs(cfg[key]):
             cfg[key] = os.path.join(root, cfg[key])
     cfg["STATION_DIR"] = os.path.join(cfg["ISMN_DIR"], cfg["NETWORK"], cfg["STATION"])
+    if cfg["END_DATE"] == "auto":
+        cfg["END_DATE"] = ismn_end_date(cfg["STATION_DIR"])
     cfg["RUN_DIR"] = os.path.join(cfg["STATION_OUTPUT_DIR"], cfg["STATION"])
     cfg["CACHE_DIR"] = os.path.join(cfg["RUN_DIR"], "cache")
     return cfg
