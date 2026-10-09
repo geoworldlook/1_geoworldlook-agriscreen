@@ -150,6 +150,12 @@ dlatego A7 zamienia próg na prawdopodobieństwo.
   na tle 5 lat, mapa anomalii, matryca sygnałów; (B) stres parowania ERA5-Land, termika S-3, radar S-1 jako panel,
   reguła zgodności wskaźników; (C) SWI 1 km (CLMS) i porównanie z EDO CDI. Każdy nowy sygnał wchodzi do produktu tylko,
   gdy na ISMN dodaje informację ponad obecne warstwy. Potem zamrożenie i opis do CV.
+- D-051 (2026-10-09): Wynik testów v1.2 (`docs/evidence/F7_v12/`): (1) zgodność NDVI/NDRE/NDMI nie poprawia warstwy
+  roślinności — status zostaje na NDVI, NDRE i NDMI tylko informacyjnie na panelu „Kondycja winnicy”; (2) prezentacja v1.2
+  wdrożona: panel kondycji, krzywa sezonu (roślinność na tle 5 poprzednich lat, gleba na tle normy 1991–2020), matryca
+  sygnałów zgodna z logiką statusu; (3) stres parowania: najpierw ET0 jako warstwa informacyjna z walidacją ET0 na stacji
+  Météo-France, test „czy poprawia glebę” dopiero po poprawieniu protokołu; (4) termika S-3 odłożona na v1.3
+  (niejednorodne archiwum, brak ISMN po 2024); (5) priorytet: dociągnięcie danych ISMN Condom za 2025–2026.
 
 ## 6. Najważniejsze źródła
 

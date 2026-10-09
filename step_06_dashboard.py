@@ -4,11 +4,15 @@ AgriWatch - KROK 6: DASHBOARD WINNICY (wzór: panel Wago, projekt ESA WineEO)
 ================================================================================
 Jeden samodzielny plik HTML dla jednej winnicy, wyświetlany w Colab i zapisywany obok biuletynu:
 
-  ┌ Działka ────────┬ Mapa NDVI 2,5 m na zdjęciu satelitarnym ┬ Status (komunikat) ┬ Ryzyko suszy (wskaźnik) ┐
-  │ nazwa, ha,      │ wybór daty sceny, obrys działki          ├ Pogoda: ostatnie 10 dni (ERA5-Land) + prognoza 7 dni ┤
-  │ źródła, pewność │                                          ├ Przyczyny: SPI-1, SPI-3, gleba, roślinność, pewność  ┤
-  ├─────────────────┴─ Wykres: ostatnie 5 lat (DASHBOARD_YEARS) ─┴─ Wiarygodność: ISMN Condom + Météo-France ─────────┤
-  └ Przymrozki i upały (ERA5-Land, progi ze stacji MF) ┴ Tabela: ostatnie 5 lat (status, przymrozki, upały) ──────┘
+  ┌ Działka ────────┬ Mapa NDVI 2,5 m na zdjęciu satelitarnym ┬ Stan (komunikat), Ryzyko suszy (wskaźnik),  ┐
+  │ nazwa, ha, dane │ wybór daty sceny, obrys działki          │ Przyczyny: SPI-1, SPI-3, gleba, roślinność   │
+  ├─ Kondycja winnicy: NDVI, NDRE, NDMI (z, klasa, 8 dni, R) ──┼ Wiarygodność: ISMN Condom + Météo-France      ┤
+  ├─ Sezon na tle lat poprzednich: NDVI (5 lat), gleba 0–100 cm (norma 1991–2020) + zdanie podsumowania ─────┤
+  ├─ Matryca sygnałów: opad -> gleba -> roślinność, 36 dekad, pasek statusu ───────────────────────────────────┤
+  ├ Pogoda: 10 dni ─┼ Prognoza 7 dni (Open-Meteo) ──────────────┼ Przymrozki i upały (progi ze stacji MF)      ┤
+  ├─ Tabela: ostatnie 5 lat (status, przymrozki, upały) ───────────────────────────────────────────────────────┤
+  └─ Wykres: ostatnie 5 lat (DASHBOARD_YEARS) ──────────────────────────────────────────────────────────────────┘
+Panele v1.2 (Kondycja, Sezon, Matryca) liczy step_09; błąd jednego z nich daje kartę „Element niedostępny”.
 
 Różnica wobec Wago: zamiast zalecenia nawadniania („podlej 35 mm”) mówimy o anomalii wilgotności
 („sprawdź winnicę”). Dane wyłącznie z wyników zadań step_05 (status_dekads.csv, veg_anomalies.csv,
@@ -209,6 +213,113 @@ def _fmt(x, nd=1, suffix=""):
         return "—"
 
 
+def _unavailable(e: Exception) -> str:
+    """Treść karty, której element nie powstał (jak przy braku prognozy: reszta dashboardu działa).
+    Dla właściciela winnicy tylko krótka informacja; typ i treść wyjątku w logu zadania i w dymku (title)."""
+    return (f'<div class="src" title="{html.escape(f"{type(e).__name__}: {e}")}">'
+            f'Element niedostępny (szczegóły w logu zadania).</div>')
+
+
+def _png_file_b64(path: str, colors: int = 64) -> str:
+    """PNG jako base64 do osadzenia w dashboardzie, zmniejszony do palety `colors` barw (ok. 4× mniej bajtów;
+    dashboard trafia do notatnika Colab). Biuletyn zostaje z pełnym PNG. Bez Pillow — plik bez zmian."""
+    data = open(path, "rb").read()
+    try:
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.open(io.BytesIO(data)).convert("RGB").quantize(colors).save(buf, format="PNG", optimize=True)
+        if buf.tell() < len(data):
+            data = buf.getvalue()
+    except Exception as e:                                  # brak Pillow / nietypowy PNG: osadzamy oryginał
+        logger.info(f"PNG bez kwantyzacji ({os.path.basename(path)}): {e}")
+    return base64.b64encode(data).decode()
+
+
+def _spark_svg(vals: List[float], dates: List[str], thr: float = -1.0, w: int = 160, h: int = 44) -> str:
+    """Mini-wykres z ostatnich dni ze sceną: oś z obejmuje dane, 0 i próg (co najmniej od −2,5 do 1),
+    linia 0 i przerywana linia progu (−1). Kolory punktów = klasy z roślinności (step_09.VEG_Z_COLORS)."""
+    import step_09_panels as s9
+    fin = [z for z in vals if np.isfinite(z)]
+    if not fin:
+        return ""
+    lo, hi = min(-2.5, min(fin) - 0.2), max(1.0, max(fin) + 0.2)
+
+    def y(z):
+        return h - 3 - (min(max(z, lo), hi) - lo) / (hi - lo) * (h - 6)
+    xs = [5 + i * (w - 10) / max(len(vals) - 1, 1) for i in range(len(vals))]
+    pts = [(x, y(z), z, d) for x, z, d in zip(xs, vals, dates) if np.isfinite(z)]
+    line = " ".join(f"{x:.1f},{yy:.1f}" for x, yy, _, _ in pts)
+    dots = "".join(f'<circle cx="{x:.1f}" cy="{yy:.1f}" r="2.4" fill="{s9.z_class(z)[2]}">'
+                   f'<title>{html.escape(d)}: z = {s9._num(z, 1)}</title></circle>' for x, yy, z, d in pts)
+    return (f'<svg viewBox="0 0 {w} {h}" width="{w}" height="{h}" style="display:block">'
+            f'<line x1="0" x2="{w}" y1="{y(0):.1f}" y2="{y(0):.1f}" stroke="#ddd"/>'
+            f'<line x1="0" x2="{w}" y1="{y(thr):.1f}" y2="{y(thr):.1f}" stroke="{s9.VEG_Z_COLORS["below"]}" '
+            f'stroke-dasharray="3,2"/>'
+            f'<polyline points="{line}" fill="none" stroke="#666" stroke-width="1.2"/>{dots}</svg>')
+
+
+def _condition_html(cond: List[Dict[str, Any]], cfg: Dict[str, Any], status_date: Optional[str]) -> str:
+    """Kafelki panelu „Kondycja winnicy” (step_09.condition_panel) i stopka z zastrzeżeniami."""
+    import step_09_panels as s9
+    esc, num = html.escape, s9._num
+    tiles = []
+    for c in cond:
+        if c.get("date") is None:
+            scene = ("brak tego wskaźnika w wynikach" if c["cls"] == "not_computed"
+                     else "brak sceny z oceną z w sezonie")
+        else:
+            age = int(c["age_days"])
+            old = c["cls"] == "stale" or age > cfg["VEG_MAX_AGE_DAYS"] or \
+                c["date"].year != (c["date"] + pd.Timedelta(days=age)).year
+            scene = (f"{'ostatnia scena sezonu' if c['cls'] == 'stale' else 'scena'} "
+                     f"{c['date']:{'%d.%m.%Y' if old else '%d.%m'}} ({s9.days_ago_pl(age)}), "
+                     f"wartość {num(c['value'])} wobec normy {num(c['clim_mean'])}")
+        ref = ""
+        if c.get("n_ref"):
+            ref = f"norma z {c['n_ref']} scen" + (f", {s9.REF_MODE_PL[c['ref_mode']]}"
+                                                  if c.get("ref_mode") in s9.REF_MODE_PL else "")
+        prod = s9.PRODUCT_PL.get(c["product"], c["product"])
+        if c.get("r") is None:
+            r_txt = "Zgodność z czujnikiem gleby 20–30 cm: brak walidacji"
+        else:
+            r_txt = (f"Zgodność z czujnikiem gleby 20–30 cm (ten sam dzień): {s9.r_strength(c['r'])}, "
+                     f"R = {num(c['r'])} [{num(c['r_lo'])}; {num(c['r_hi'])}], n = {c.get('r_n') or '—'} dni ze sceną"
+                     + (f" ({c['r_from']}–{c['r_to']})" if c.get("r_from") else ""))
+        hint = ""
+        if c["cls"] in ("below", "well_below") and np.isfinite(c["z"]) and c["z"] <= cfg["THR_VEG"] \
+                and c.get("drop_hint"):
+            hint = f'<div class="src"><b>Możliwe przyczyny:</b> {esc(c["drop_hint"])}</div>'
+        note = f'<div class="src" style="color:#b35c00">{esc(c["note"])}</div>' if c.get("note") else ""
+        stat = ""
+        ss = c.get("status_scene")
+        if ss is not None and (c.get("date") is None or not c["in_status"]
+                               or pd.Timestamp(c["date"]).normalize() != pd.Timestamp(ss["date"]).normalize()):
+            stat = (f'<div class="src">W statusie (dekada do {ss["dekad"]:%d.%m.%Y}): scena {ss["date"]:%d.%m}, '
+                    f'z = {num(ss["z"], 1)} ({esc(s9.PRODUCT_PL.get(ss["product"], ss["product"]))})</div>')
+        if c["in_status"]:
+            badge = '<span class="badge">używany w statusie</span>'
+        elif c.get("status_index"):
+            badge = (f'<span class="badge info">{esc(prod)} — status używa '
+                     f'{esc(s9.PRODUCT_PL.get(cfg["VEG_PRODUCT"], cfg["VEG_PRODUCT"]))}</span>')
+        else:
+            badge = '<span class="badge info">informacyjnie</span>'
+        n_sp = len(c["spark"])
+        sp_when = "w ostatnim dniu ze sceną" if n_sp == 1 else f"w ostatnich {n_sp} dniach ze sceną"
+        sp_txt = (f'<div class="src">Odchylenie z {sp_when}'
+                  f'{" (" + c["spark_dates"][0][:5] + "–" + c["spark_dates"][-1][:5] + ")" if n_sp > 1 else ""}; '
+                  f'przerywana linia: próg {num(cfg["THR_VEG"], 0)}</div>') if n_sp else ""
+        tiles.append(
+            f'<div class="tile"><div class="tl"><b>{esc(c["label"])}</b>{badge}</div>'
+            f'<div class="zbig" style="color:{c["color"]}">{num(c["z"], 1)}</div>'
+            f'<div style="color:{c["color"]};font-weight:600;font-size:13px">{esc(c["cls_label"])}</div>'
+            f'<div style="font-size:12px">{esc(scene)} · {esc(prod)}</div>'
+            f'<div class="src">{esc(c["meaning"])}{"; " + esc(ref) if ref else ""}</div>'
+            f'{_spark_svg(c["spark"], c["spark_dates"], cfg["THR_VEG"])}{sp_txt}'
+            f'<div class="src">{esc(r_txt)}</div>{stat}{note}{hint}</div>')
+    return (f'<div class="cond">{"".join(tiles)}</div>'
+            f'<div class="src" style="margin-top:8px">{esc(s9.condition_footer(cond, cfg, status_date))}</div>')
+
+
 def _weather_info(out_dir: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Wyniki task_weather: progi, zdarzenia w winnicy per rok, linie wiarygodności (stacja referencyjna MF)."""
     def rd(name):
@@ -359,6 +470,38 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
     trust += wx["trust"]
     trust.append("Alarm (gleba + roślinność) nie jest jeszcze zwalidowany na stanie wodnym winorośli")
 
+    # --- Panele v1.2 (step_09): każdy osobno; błąd jednego (także import step_09) daje kartę „Element
+    # niedostępny”, reszta dashboardu powstaje ---
+    panels: Dict[str, str] = {"traj_title": "Sezon na tle lat poprzednich"}
+
+    def element(name, fn):
+        try:
+            panels[name] = fn()
+        except Exception as ex:
+            logger.warning(f"Dashboard: element {name} niedostępny: {type(ex).__name__}: {ex}")
+            panels[name] = _unavailable(ex)
+
+    def condition_html():
+        import step_09_panels as s9
+        return _condition_html(s9.condition_panel(veg, val, cfg, sid, status_row=cur), cfg, cur["date"])
+
+    def season_html():
+        import step_09_panels as s9
+        traj = s9.season_trajectory(veg, era5, cfg, sid)
+        png = s9.plot_season_trajectory(traj, cfg, os.path.join(out_dir, "season_trajectory.png"))
+        panels["traj_title"] = f"Sezon {traj['year']} na tle lat poprzednich"
+        return (f'<div style="font-size:14px;font-weight:600;margin-bottom:6px">{html.escape(s9.season_summary(traj))}'
+                f'</div><img src="data:image/png;base64,{_png_file_b64(png)}" style="width:100%">'
+                f'<div class="src">{html.escape(s9.season_caption(traj, cfg))}</div>')
+
+    def matrix_html():
+        import step_09_panels as s9
+        return s9.matrix_html(s9.signal_matrix(status, veg, cfg, sid), cfg, {k: v[0] for k, v in STATUS_PL.items()})
+
+    element("condition", condition_html)
+    element("season", season_html)
+    element("matrix", matrix_html)
+
     cov = sr_coverage(rt, cfg)
     label, meaning, color = STATUS_PL.get(cur["cdi_class"], (cur["cdi_class"], "", "#888"))
     run_start = cur["date"]                                # początek bieżącego ciągu dekad w tej samej klasie
@@ -381,7 +524,7 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
         "layers": layers,
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     }
-    page = _render(payload, e, fc, chart, trust, cov, cfg, wx, years_tbl)
+    page = _render(payload, e, fc, chart, trust, cov, cfg, wx, years_tbl, panels)
     path = os.path.join(out_dir, "dashboard.html")
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
@@ -391,9 +534,14 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
 
 def _render(p: Dict[str, Any], era: pd.DataFrame, fc: Optional[pd.DataFrame], chart: str, trust: List[str],
             cov: Dict[str, int], cfg: Dict[str, Any], wx: Optional[Dict[str, Any]] = None,
-            years_tbl: Optional[pd.DataFrame] = None) -> str:
+            years_tbl: Optional[pd.DataFrame] = None, panels: Optional[Dict[str, str]] = None) -> str:
     s, d = p["status"], p["drivers"]
     esc = html.escape
+    panels = panels or {}
+    na = '<div class="src">Element niedostępny: nie policzono.</div>'
+    r0, r1 = cfg["CLIM_REF"]
+    norm_txt = (f"Norma: {str(r0)[:4]}–{str(r1)[:4]} (gleba, opad), {int(cfg.get('VEG_REF_YEARS') or 5)} poprzednich "
+                f"lat, zwykle ten sam tor orbity (roślinność)")
 
     def drv(name, val, note=""):
         v = _fmt(val, 1)
@@ -480,6 +628,12 @@ table{{font-size:12px;border-collapse:collapse;width:100%}} td,th{{padding:2px 4
 .src{{color:#888;font-size:11px}} .legend{{display:flex;align-items:center;gap:6px;font-size:12px;margin-top:6px}}
 .bar{{height:10px;flex:1;background:linear-gradient(90deg,#a50026,#f46d43,#fee08b,#a6d96a,#1a9850);border-radius:3px}}
 ul{{padding-left:18px;font-size:12px;margin:4px 0}} .full{{grid-column:1/4}}
+.cond{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}}
+.tile{{border:1px solid #e6e6e6;border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:3px}}
+.tile .tl{{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:13px}}
+.zbig{{font-size:32px;font-weight:700;line-height:1.1}}
+.badge{{font-size:10px;padding:1px 7px;border-radius:9px;background:#e4f0d8;color:#3d6b1f;white-space:nowrap}}
+.badge.info{{background:#f0f0f0;color:#666}}
 </style></head><body>
 <div class="top">AgriWatch · monitoring anomalii wilgotności <small>{esc(p['generated'])}</small></div>
 <div class="grid">
@@ -491,7 +645,7 @@ ul{{padding-left:18px;font-size:12px;margin:4px 0}} .full{{grid-column:1/4}}
   <div class="drv"><span>Stacja ISMN</span><b>136 m</b></div>
   <h3 style="margin-top:14px">Dane</h3>
   <ul><li>Opad, gleba: ERA5-Land (~9 km)</li><li>Roślinność: Sentinel-2, {"SEN2SR 2,5 m" if cfg['VEG_PRODUCT'] == 'S2SR_2.5m' else "10 m"}</li>
-  <li>{esc(cov_txt)}</li><li>Norma: 1991–2020 (gleba), inne lata (roślinność)</li></ul>
+  <li>{esc(cov_txt)}</li><li>{esc(norm_txt)}</li></ul>
  </div>
  <div class="card"><h3>Roślinność (NDVI) <select id="sel" style="float:right">{opts}</select></h3>
   <div id="map"></div>
@@ -507,13 +661,16 @@ ul{{padding-left:18px;font-size:12px;margin:4px 0}} .full{{grid-column:1/4}}
    {drv("Opad 30 dni (SPI-1)", d['spi1'], "próg −2")}{drv("Opad 90 dni (SPI-3)", d['spi3'], "próg −1")}
    {drv("Wilgotność gleby 0–100 cm", d['sma'], "próg −1")}{drv("Wierzchnia warstwa 0–7 cm", d.get('sma_l1'), "informacyjnie")}{drv("Roślinność winnicy (NDVI)", d['veg_z'], veg_note)}</div>
  </div>
+ <div class="card" style="grid-column:1/3"><h3>Kondycja winnicy</h3>{panels.get("condition", na)}</div>
+ <div class="card"><h3>Wiarygodność (ISMN Condom)</h3><ul>{trust_html}</ul>
+  <div class="src">Status oznacza „sprawdź winnicę”, nie diagnozę stresu wodnego winorośli. Umiarkowany niedobór wody bywa pożądany dla jakości.</div></div>
+ <div class="card full"><h3>{esc(panels.get("traj_title", "Sezon na tle lat poprzednich"))}</h3>{panels.get("season", na)}</div>
+ <div class="card full"><h3>Matryca sygnałów</h3>{panels.get("matrix", na)}</div>
  <div class="card"><h3>Pogoda: ostatnie dni (ERA5-Land)</h3>
   <table><tr><th>dzień</th><th>opad mm</th><th>Tmin °C</th><th>Tmax °C</th></tr>{era_rows}</table></div>
  <div class="card"><h3>Prognoza 7 dni</h3>{fc_html}</div>
- <div class="card"><h3>Wiarygodność (ISMN Condom)</h3><ul>{trust_html}</ul>
-  <div class="src">Status oznacza „sprawdź winnicę”, nie diagnozę stresu wodnego winorośli. Umiarkowany niedobór wody bywa pożądany dla jakości.</div></div>
  <div class="card"><h3>Przymrozki i upały</h3>{hz_html}</div>
- <div class="card" style="grid-column:2/4"><h3>Ostatnie {int(cfg.get("DASHBOARD_YEARS", 5))} lat</h3>{yt_html or '<div class="src">Brak danych.</div>'}</div>
+ <div class="card full"><h3>Ostatnie {int(cfg.get("DASHBOARD_YEARS", 5))} lat</h3>{yt_html or '<div class="src">Brak danych.</div>'}</div>
  <div class="card full"><h3>Ostatnie {int(cfg.get("DASHBOARD_YEARS", 5))} lat: opad, gleba, roślinność, status</h3>{f'<img src="data:image/png;base64,{chart}" style="width:100%">' if chart else '<div class="src">Wykres powstaje w task_bulletin.</div>'}</div>
 </div>
 <script>
@@ -551,8 +708,10 @@ show(0);
 </script></body></html>"""
 
 
-def show_dashboard(path: str, height: int = 1250):
-    """Wyświetla dashboard w komórce Colab / Jupyter."""
+def show_dashboard(path: str, height: int = 3400):
+    """Wyświetla dashboard w komórce Colab / Jupyter. Ramka dopasowuje wysokość do strony po załadowaniu
+    (onload); `height` to wysokość startowa, gdy przeglądarka nie pozwala odczytać treści ramki."""
     from IPython.display import HTML, display
-    display(HTML(f'<iframe srcdoc="{html.escape(open(path, encoding="utf-8").read())}" '
+    fit = "try{this.style.height=(this.contentDocument.documentElement.scrollHeight+20)+'px'}catch(e){}"
+    display(HTML(f'<iframe srcdoc="{html.escape(open(path, encoding="utf-8").read())}" onload="{fit}" '
                  f'style="width:100%;height:{height}px;border:0"></iframe>'))

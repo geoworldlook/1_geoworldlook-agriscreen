@@ -1,0 +1,120 @@
+{
+ "protocol": {
+  "version": "evap-prereg-1.0",
+  "frozen": "2026-10-09",
+  "period": [
+   "2016-01-01",
+   "2024-12-31"
+  ],
+  "ref_test": [
+   "1991-01-01",
+   "2015-12-31"
+  ],
+  "half_window": 15,
+  "confirmatory": {
+   "EDDI14": [
+    "eddi",
+    14
+   ],
+   "SESR14": [
+    "sesr",
+    14
+   ]
+  },
+  "exploratory": {
+   "EDDI7": [
+    "eddi",
+    7
+   ],
+   "EDDI30": [
+    "eddi",
+    30
+   ],
+   "SESR7": [
+    "sesr",
+    7
+   ],
+   "SESR30": [
+    "sesr",
+    30
+   ]
+  },
+  "season_primary": "IV-X",
+  "seasons": {
+   "all": [
+    1,
+    12
+   ],
+   "IV-X": [
+    4,
+    10
+   ],
+   "VII-X": [
+    7,
+    10
+   ],
+   "XI-III": [
+    11,
+    3
+   ]
+  },
+  "cv_primary": "forward",
+  "cv_secondary": "loyo",
+  "min_train_years": 3,
+  "boot_n": 2000,
+  "boot_block": "30d",
+  "boot_sensitivity": "year",
+  "seed": 42,
+  "placebo_n": 500,
+  "onset_placebo_n": 200,
+  "lead_h": 14,
+  "lead_h_report": [
+   7,
+   30
+  ],
+  "ccf_lags": [
+   -30,
+   60
+  ],
+  "onset": {
+   "thr": -1.0,
+   "min_days": 14,
+   "merge_gap": 5,
+   "quiet": 30,
+   "cover": 0.8,
+   "months": [
+    3,
+    10
+   ],
+   "before": 60,
+   "after": 30
+  },
+  "alpha": 0.05,
+  "min_effect": {
+   "H1": 0.02,
+   "H2": 0.1,
+   "H3": 0.02
+  },
+  "no_harm_drop": 0.02,
+  "gate": {
+   "r": 0.583,
+   "tol": 0.005,
+   "n": 2976
+  }
+ },
+ "sha256_12": "0d39a1361652",
+ "hypotheses": {
+  "H1": "IV-X, ISMN 20-30 cm z: forward-chained OLS [ERA5 RZ + X] vs [ERA5 RZ]; paired dR (30-d blocks, 2000, seed 42); one-sided p=P*(dR<=0); Holm over 6; dR>=0.02; dR>placebo q95 (500 year permutations)",
+  "H2": "IV-X: partial r(ISMN z, X | ERA5 RZ z, ERA5 0-28 z) one-sided p; Holm; r>=0.10 (rules out depth artefact of F4 B V10)",
+  "H3": "IV-X: lead (Granger): forward-chained OLS of y(t+14)-y(t) on [y(t), ERA5 RZ, ERA5 0-28] +/- X; paired dR; Holm; dR>=0.02; dR>placebo q95",
+  "H4": "supportive, descriptive (n~6 onsets): freq-matched thresholds; X earlier than ERA5 0-100 AND 0-28 in >=5/6 onsets; median advantage vs 0-28 >=7 d and > placebo q95 (200 year permutations); false-onset frac <= 0-28 + 0.15",
+  "no_harm": "all-year, XI-III, 5 cm: dR upper CI >= 0 and dR >= -0.02"
+ },
+ "decisions": {
+  "PSMA": "H1 and H2 and no_harm -> index enters p_soil_drought (combined predictor, rho = forward-chained out-of-sample R)",
+  "lead_text": "H3 and H4 -> dashboard early-warning sentence",
+  "depth_artefact": "H1 and not H2 -> rejected, recorded as depth artefact (F4 B V10 pattern)",
+  "tie": "both accepted -> EDDI14 unless SESR14 model beats EDDI14 model with paired dR lower CI > 0",
+  "cdi": "CDI classes unchanged in every outcome (D-042)"
+ }
+}

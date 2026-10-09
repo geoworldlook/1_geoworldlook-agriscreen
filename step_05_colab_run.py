@@ -376,6 +376,20 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "VEG_BY_TRACK": True,                 # odniesienie z tego samego toru orbity S-2 (A2)
     "VEG_PREDICTIVE_Z": True,             # z predykcyjne z rozkładu t (A3)
     "VEG_REF_YEARS": 5,                   # klimatologia z ostatnich 5 lat wcześniejszych (trend zarządzania międzyrzędziem)
+    "VEG_ANOM_INDICES": ("ndvi", "ndre", "ndmi", "crswir"),   # anomalie liczone w _veg_anomalies; status: tylko VEG_INDEX
+    # Panele prezentacji v1.2 (step_09). Stałe a priori, jak VEG_REF_YEARS i VEG_HALF_WINDOW_DAYS; nie strojone na ISMN
+    "CONDITION_INDICES": ("ndvi", "ndre", "ndmi"),            # panel „Kondycja winnicy”
+    "CONDITION_PRODUCT": None,            # None = VEG_PRODUCT (zapasowo 10 m, gdy najnowsza scena SR nie ma wskaźnika)
+    "TRAJ_REF_YEARS": 5,                  # krzywa sezonu: pasmo NDVI z lat Y-5..Y-1 (ściśle wcześniejszych niż Y)
+    "TRAJ_MONTHS": None,                  # None = S2_MONTHS
+    "TRAJ_HALF_WINDOW_DAYS": 15,          # okno dnia roku pasma NDVI (pasmo gleby: norma CLIM_REF, CLIM_HALF_WINDOW_DAYS)
+    "TRAJ_MIN_N": 8,                      # min. dni ze sceną w oknie, żeby podać kwantyle pasma NDVI
+    "TRAJ_MIN_YEARS": 3,                  # ... i min. liczba lat w tym oknie
+    "TRAJ_QUANTILES": (0.1, 0.5, 0.9),
+    "TRAJ_SMOOTH_DAYS": 7,                # średnia krocząca tylko pasma odniesienia; punkty sezonu bez wygładzania
+    "MATRIX_DEKADS": 36,                  # matryca sygnałów: ostatnie 36 dekad (12 miesięcy)
+    "MATRIX_CLIP_Z": 2.5,                 # skala koloru z obcięta do ±2,5
+    "MATRIX_SHOW_PLACEHOLDERS": False,    # wiersze-zaślepki (parowanie, S-1, S-3) ukryte do czasu danych (v1.2 B)
     # Prawdopodobieństwo suszy gleby (A7): korelacja anomalii ERA5-Land 0-100 cm z ISMN Condom 20-30 cm
     "PSMA_RHO": 0.58,
     # Progi statusu (EDO CDI)
@@ -664,9 +678,13 @@ def task_scene_stats(rt: Dict[str, Any], cfg: Dict[str, Any], use_sr: Optional[b
 
 
 def _veg_anomalies(rt: Dict[str, Any], cfg: Dict[str, Any]) -> pd.DataFrame:
-    """Anomalie NDVI i NDMI dla każdego obiektu i produktu (10 m, SR 2,5 m) w sezonie S2_MONTHS."""
+    """
+    Anomalie wskaźników VEG_ANOM_INDICES (NDVI, NDRE, NDMI, CRSWIR) dla każdego obiektu i produktu (10 m, SR 2,5 m)
+    w sezonie S2_MONTHS. Kolumny track i ref_mode: tor orbity sceny i odniesienie klimatologii (same_track /
+    all_tracks). Status używa tylko VEG_INDEX z VEG_PRODUCT; pozostałe wskaźniki są informacyjne (step_09).
+    """
     import step_04_metrics_alert as s4
-    cols = ["site_id", "product", "index", "time", "value", "clim_mean", "clim_std", "z", "n_ref"]
+    cols = ["site_id", "product", "index", "time", "value", "clim_mean", "clim_std", "z", "n_ref", "track", "ref_mode"]
     obs = registry_read(rt, "gwl_observations")
     obs = obs[obs["product"].isin(["S2_10m", "S2SR_2.5m"])]
     if obs.empty:
@@ -677,7 +695,7 @@ def _veg_anomalies(rt: Dict[str, Any], cfg: Dict[str, Any]) -> pd.DataFrame:
     w = w[w["time"].dt.month.between(m0, m1)]
     parts = []
     for (site, prod), g in w.groupby(["site_id", "product"]):
-        for idx in ("ndvi", "ndmi", "crswir"):
+        for idx in cfg.get("VEG_ANOM_INDICES", MONITOR_CONFIG["VEG_ANOM_INDICES"]):
             if idx not in g or g[idx].isna().all():      # np. NDMI z SR, gdy pasma 20 m nie przeszły kontroli
                 continue
             a = s4.scene_anomaly(g, idx, cfg)
@@ -685,7 +703,8 @@ def _veg_anomalies(rt: Dict[str, Any], cfg: Dict[str, Any]) -> pd.DataFrame:
                 parts.append(pd.DataFrame({"site_id": site, "product": prod, "index": idx, "time": a["time"].to_numpy(),
                                            "value": a[idx].to_numpy(), "clim_mean": a["clim_mean"].to_numpy(),
                                            "clim_std": a["clim_std"].to_numpy(), "z": a["z"].to_numpy(),
-                                           "n_ref": a["n_ref"].to_numpy()}))
+                                           "n_ref": a["n_ref"].to_numpy(), "track": a["track"].to_numpy(),
+                                           "ref_mode": a["ref_mode"].to_numpy()}))
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=cols)
 
 
@@ -802,19 +821,47 @@ def task_weather(rt: Dict[str, Any], cfg: Dict[str, Any], fetch: bool = True) ->
 
 
 def task_bulletin(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Biuletyn dla winnicy: bulletin.md, wykresy, agriwatch_latest.json (do publikacji na stronie)."""
+    """
+    Biuletyn dla winnicy: bulletin.md, wykresy, agriwatch_latest.json (do publikacji na stronie) oraz panele v1.2
+    (step_09): krzywa sezonu (season_trajectory.png) i matryca sygnałów (signal_matrix.png, signal_matrix.csv),
+    dopisane na końcu bulletin.md z polskimi podpisami (jak pod wykresami w dashboardzie). Błąd paneli — także
+    brak modułu step_09 — nie blokuje biuletynu ani agriwatch_latest.json (ostrzeżenie w komunikacie zadania).
+    """
     import step_04_metrics_alert as s4
-    status = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "status_dekads.csv"))
-    veg = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "veg_anomalies.csv"), parse_dates=["time"])
-    vpath = os.path.join(cfg["OUTPUT_DIR"], "validation_anomalies.csv")
+    out = cfg["OUTPUT_DIR"]
+    status = pd.read_csv(os.path.join(out, "status_dekads.csv"))
+    veg = pd.read_csv(os.path.join(out, "veg_anomalies.csv"), parse_dates=["time"])
+    vpath = os.path.join(out, "validation_anomalies.csv")
     val = pd.read_csv(vpath) if os.path.exists(vpath) else pd.DataFrame()
     sites = registry_read(rt, "gwl_sites")
     s = sites[sites["site_id"] == cfg["MAIN_SITE"]]
     site = s.iloc[0].to_dict() if len(s) else {"site_id": cfg["MAIN_SITE"], "name": cfg["MAIN_SITE"]}
     veg_main = veg[veg["index"] == cfg["VEG_INDEX"]] if len(veg) else veg
-    paths = s4.build_bulletin(status, veg_main, val, site, dict(cfg, SR_COVERAGE=sr_coverage(rt, cfg)),
-                              cfg["OUTPUT_DIR"])
-    return {"message": ", ".join(os.path.relpath(p, cfg["PROJECT_DIR"]) for p in paths.values())}
+    paths = s4.build_bulletin(status, veg_main, val, site, dict(cfg, SR_COVERAGE=sr_coverage(rt, cfg)), out)
+    extra, warn = [], ""
+    try:
+        import step_09_panels as s9
+        traj = s9.season_trajectory(veg, pd.read_csv(_era5_csv(cfg), parse_dates=["time"]), cfg, cfg["MAIN_SITE"])
+        paths["png_trajectory"] = s9.plot_season_trajectory(traj, cfg, os.path.join(out, "season_trajectory.png"))
+        extra.append(f"## Season {traj['year']} against previous years\n\n_{s9.season_summary(traj)}_ (PL)\n\n"
+                     f"![season trajectory](season_trajectory.png)\n\n{s9.season_caption(traj, cfg)}\n")
+    except Exception as e:
+        warn += f"; krzywa sezonu niedostępna: {type(e).__name__}: {e}"
+        logger.warning(f"Biuletyn: krzywa sezonu niedostępna: {e}")
+    try:
+        import step_09_panels as s9
+        mx = s9.signal_matrix(status, veg, cfg, cfg["MAIN_SITE"])
+        paths["png_matrix"] = s9.plot_signal_matrix(mx, cfg, os.path.join(out, "signal_matrix.png"))
+        extra.append(f"## Signal matrix: last {mx['z'].shape[1]} dekads\n\n![signal matrix](signal_matrix.png)\n\n"
+                     f"{s9.matrix_caption(mx, cfg)}\n")
+    except Exception as e:
+        warn += f"; matryca sygnałów niedostępna: {type(e).__name__}: {e}"
+        logger.warning(f"Biuletyn: matryca sygnałów niedostępna: {e}")
+    if extra:
+        with open(paths["markdown"], "a", encoding="utf-8") as f:
+            f.write("\n" + "\n".join(extra) + "\nPanel labels and captions are in Polish (same figures and texts as "
+                    "the dashboard).\n")
+    return {"message": ", ".join(os.path.relpath(p, cfg["PROJECT_DIR"]) for p in paths.values()) + warn}
 
 
 def task_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = True) -> Dict[str, Any]:
@@ -1114,6 +1161,20 @@ def _selftest(out_dir: str) -> None:
     n_layers = dash.count('"png": "')
     assert "Ryzyko suszy" in dash and "L.imageOverlay" in dash and n_layers >= 5, n_layers
     assert "Przymrozki i upały" in dash and "Météo-France" in dash and "Ostatnie 5 lat" in dash
+    # Panele v1.2 (step_09): obecne i zbudowane bez błędu; NDRE w anomaliach i walidacji; PNG do biuletynu
+    assert "Kondycja winnicy" in dash and "Matryca sygnałów" in dash and "na tle" in dash
+    assert "Element niedostępny" not in dash, "Panel v1.2 nie powstał (ostrzeżenie w logu dashboardu)"
+    assert (val["product"] == "S2SR_2.5m_NDRE").any(), "Brak walidacji NDRE z SR 2,5 m"
+    for name in ("season_trajectory.png", "signal_matrix.png", "signal_matrix.csv"):
+        assert os.path.exists(os.path.join(cfg["OUTPUT_DIR"], name)), name
+    bmd = open(os.path.join(cfg["OUTPUT_DIR"], "bulletin.md"), encoding="utf-8").read()
+    assert "season_trajectory.png" in bmd and "Pasmo NDVI" in bmd and "Kolejność jak w europejskim" in bmd, \
+        "Biuletyn: brak wykresów v1.2 lub ich podpisów"
+    import step_09_panels as s9
+    veg = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "veg_anomalies.csv"), parse_dates=["time"])
+    assert {"track", "ref_mode"} <= set(veg.columns) and (veg["index"] == "ndre").any(), veg.columns
+    s9._selftest_panels(veg, pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "status_dekads.csv")), era5, cfg,
+                        cfg["MAIN_SITE"])
     wv = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_weather.csv"))
     b = wv[(wv["product"] == "ERA5L_TMIN") & (wv["period"] == "all") & (wv["metric"] == "bias")]["value"].iat[0]
     assert abs(b - 1.0) < 0.1, b                    # ERA5 cieplejsze o 1 °C od stacji
@@ -1124,6 +1185,27 @@ def _selftest(out_dir: str) -> None:
     summ = json.load(open(os.path.join(cfg["OUTPUT_DIR"], "run_summary.json"), encoding="utf-8"))
     assert summ["sr"]["scenes_checked"] == 126 and summ["status_current"] and summ["validation"], summ["sr"]
     print(f"[OK] Raport z uruchomienia: {len(open(os.path.join(cfg['OUTPUT_DIR'], 'run_summary.md'), encoding='utf-8').read()) // 1024} kB")
+    # Brak modułu step_09 (np. plik niedodany do repozytorium przed git pull w Colab): biuletyn, JSON strony
+    # i dashboard i tak powstają, a panele v1.2 dają karty „Element niedostępny”. Kopia wyników w osobnym katalogu.
+    deg = dict(cfg, OUTPUT_DIR=os.path.join(out_dir, "out_no_panels"))
+    shutil.copytree(cfg["OUTPUT_DIR"], deg["OUTPUT_DIR"])
+    for name in ("bulletin.md", "agriwatch_latest.json", "dashboard.html"):
+        os.remove(os.path.join(deg["OUTPUT_DIR"], name))
+    saved_s9 = sys.modules.get("step_09_panels")
+    sys.modules["step_09_panels"] = None             # import step_09_panels -> ImportError
+    try:
+        msg_b = task_bulletin(rt, deg)["message"]
+        task_dashboard(rt, deg, forecast=False)
+    finally:
+        if saved_s9 is None:
+            sys.modules.pop("step_09_panels", None)
+        else:
+            sys.modules["step_09_panels"] = saved_s9
+    for name in ("bulletin.md", "agriwatch_latest.json", "dashboard.html"):
+        assert os.path.exists(os.path.join(deg["OUTPUT_DIR"], name)), name
+    d2 = open(os.path.join(deg["OUTPUT_DIR"], "dashboard.html"), encoding="utf-8").read()
+    assert "niedostępna" in msg_b and d2.count("Element niedostępny") == 3 and "Ryzyko suszy" in d2, msg_b
+    print("[OK] Bez modułu step_09: biuletyn, agriwatch_latest.json i dashboard powstają (3 karty „Element niedostępny”).")
     print("[OK] Selftest monitoringu. Status:", js["current"]["date"], js["current"]["cdi_class"])
     print(val[["product", "reference", "segment", "subset", "metric", "value", "n"]].round(3).to_string(index=False))
 
