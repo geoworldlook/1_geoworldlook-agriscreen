@@ -401,6 +401,10 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "MF_MIN_COVERAGE": 0.8,               # udział dni z TN i TX od WX_VAL_START
     "WX_VAL_START": "2016-01-01",
     "WX_CAL_SPLIT_YEAR": 2021,            # próg ERA5 kalibrowany na latach < 2021, oceniany na latach >= 2021
+    "WX_REF_MAX_KM": 5.0,                 # stacja referencyjna dla progów winnicy (Condom: 0,2 km); dalsze tylko walidują
+    "WX_MIN_CAL_EVENTS": 10,              # min. dni ze zdarzeniem do kalibracji progu (mniej = próg nominalny)
+    "WX_MIN_TEST_EVENTS": 10,             # min. dni ze zdarzeniem w latach testowych, żeby podać POD/FAR
+    "WX_MIN_CSI_GAIN": 0.05,              # próg skalibrowany tylko, gdy na latach kalibracji poprawia CSI o >= 0,05
     "FROST_SEASON": ("03-15", "05-15"),   # po pąkowaniu winorośli w Gers (przymrozki wiosenne)
     "FROST_TMIN": 0.0,                    # Tmin w klatce 2 m; pąki bywają 1-2 °C zimniejsze
     "HEAT_SEASON": ("06-01", "08-31"),
@@ -778,7 +782,7 @@ def task_weather(rt: Dict[str, Any], cfg: Dict[str, Any], fetch: bool = True) ->
     stations.to_csv(os.path.join(cfg["OUTPUT_DIR"], "mf_stations.csv"), index=False)
 
     era5 = pd.read_csv(_era5_csv(cfg), parse_dates=["time"])
-    thr = s8.calibrated_thresholds(val, cfg)
+    thr = s8.calibrated_thresholds(val, stations, cfg)
     if "t2m_max_c" not in era5:
         era5["t2m_max_c"] = np.nan
     hz = s8.weather_hazards(era5, cfg, thr)
@@ -788,7 +792,8 @@ def task_weather(rt: Dict[str, Any], cfg: Dict[str, Any], fetch: bool = True) ->
     with open(os.path.join(cfg["OUTPUT_DIR"], "hazard_thresholds.json"), "w") as f:
         json.dump(thr, f)
     msg = (f"{len(stations)} stacji MF ({', '.join(f'{r.name} {r.dist_km:.0f} km' for r in stations.itertuples())}); "
-           f"progi ERA5: przymrozek Tmin ≤ {thr['frost']:+.2f} °C, upał Tmax ≥ {thr['heat']:.2f} °C; "
+           f"progi ERA5: przymrozek Tmin ≤ {thr['frost']:+.2f} °C ({thr['frost_source']}), "
+           f"upał Tmax ≥ {thr['heat']:.2f} °C ({thr['heat_source']}); "
            f"{len(val)} metryk")
     out = {"message": msg}
     if len(val):
@@ -1113,7 +1118,7 @@ def _selftest(out_dir: str) -> None:
     b = wv[(wv["product"] == "ERA5L_TMIN") & (wv["period"] == "all") & (wv["metric"] == "bias")]["value"].iat[0]
     assert abs(b - 1.0) < 0.1, b                    # ERA5 cieplejsze o 1 °C od stacji
     thr = json.load(open(os.path.join(cfg["OUTPUT_DIR"], "hazard_thresholds.json")))
-    assert 0.0 < thr["frost"] < 2.0, thr
+    assert 0.0 <= thr["frost"] < 2.0 and thr["reference"] == "MF_32999001", thr
     print(f"[OK] Pogoda: {len(wv)} metryk MF, progi {thr}")
     print(f"[OK] Dashboard: {n_layers} dat mapy NDVI, {len(dash) // 1024} kB")
     summ = json.load(open(os.path.join(cfg["OUTPUT_DIR"], "run_summary.json"), encoding="utf-8"))

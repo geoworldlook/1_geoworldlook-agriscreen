@@ -217,6 +217,11 @@ def hazard_validation(era: pd.DataFrame, stn: pd.DataFrame, cfg: Dict[str, Any])
             if obs[tr].sum() >= 5 else (np.nan, np.nan)
         ev = "frost" if below else "heat"
         rows.append((var, f"{ev}_events", f"train<{split}", "threshold_cal", cal, int(obs[tr].sum())))
+        # CSI na latach kalibracji dla progu nominalnego i skalibrowanego: wybór progu bez zaglądania w lata testowe
+        x_tr = s.loc[tr, e_col].to_numpy()
+        c_nom = contingency(obs[tr].to_numpy(), x_tr <= thr if below else x_tr >= thr)["csi"]
+        rows.append((var, f"{ev}_events", f"train<{split} nominal", "csi", c_nom, int(obs[tr].sum())))
+        rows.append((var, f"{ev}_events", f"train<{split} calibrated", "csi", csi_tr, int(obs[tr].sum())))
         for name, t in (("nominal", thr), ("calibrated", cal)):
             if not np.isfinite(t):
                 continue
@@ -282,15 +287,43 @@ def validate_weather(stations: pd.DataFrame, mf: pd.DataFrame, era_by_station: D
     return pd.DataFrame(out)
 
 
-def calibrated_thresholds(val: pd.DataFrame, cfg: Dict[str, Any]) -> Dict[str, float]:
-    """Progi ERA5 dla zagrożeń: mediana progów skalibrowanych na stacjach; brak = progi nominalne."""
-    thr = {"frost": cfg["FROST_TMIN"], "heat": cfg["HEAT_TMAX"]}
-    if val is None or val.empty:
+def calibrated_thresholds(val: pd.DataFrame, stations: pd.DataFrame, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Progi ERA5 dla zagrożeń w winnicy. Kalibrujemy tylko na stacji referencyjnej: najbliższej, nie dalej niż
+    WX_REF_MAX_KM (dalsze stacje mają inny mikroklimat, a różnica ERA5-stacja jest tam cechą miejsca, nie błędem
+    ERA5 w winnicy). Próg skalibrowany wchodzi, gdy w latach kalibracji było >= WX_MIN_CAL_EVENTS dni ze zdarzeniem
+    i gdy na tych latach poprawia CSI względem progu nominalnego o >= WX_MIN_CSI_GAIN (mniejsza poprawka to szum
+    dopasowania). Inaczej zostaje próg nominalny. Lata testowe nie biorą udziału w wyborze.
+    Zwraca progi, ich źródło i stację referencyjną.
+    """
+    thr: Dict[str, Any] = {"frost": float(cfg["FROST_TMIN"]), "heat": float(cfg["HEAT_TMAX"]),
+                           "frost_source": "nominalny", "heat_source": "nominalny", "reference": ""}
+    if val is None or val.empty or stations is None or stations.empty:
         return thr
+    near = stations.sort_values("dist_km").iloc[0]
+    if float(near["dist_km"]) > cfg["WX_REF_MAX_KM"]:
+        thr["frost_source"] = thr["heat_source"] = f"nominalny (brak stacji w promieniu {cfg['WX_REF_MAX_KM']} km)"
+        return thr
+    ref = f"MF_{near['num_poste']}"
+    thr["reference"] = ref
     for ev, prod in (("frost", "ERA5L_TMIN"), ("heat", "ERA5L_TMAX")):
-        q = val[(val["product"] == prod) & (val["metric"] == "threshold_cal")]["value"].dropna()
-        if len(q):
-            thr[ev] = float(q.median())
+        q = val[(val["reference"].astype(str) == ref) & (val["product"] == prod) & (val["metric"] == "threshold_cal")]
+        q = q.dropna(subset=["value"])
+        n = int(q["n"].iat[0]) if len(q) else 0
+        if not len(q) or n < cfg["WX_MIN_CAL_EVENTS"]:
+            thr[f"{ev}_source"] = f"nominalny (za mało zdarzeń do kalibracji na stacji {near['name']}: {n})"
+            continue
+        csi = val[(val["reference"].astype(str) == ref) & (val["product"] == prod) & (val["metric"] == "csi")]
+        get = lambda tag: csi.loc[csi["period"].astype(str).str.endswith(tag), "value"]
+        nom, cal = get(" nominal"), get(" calibrated")
+        gain = float(cal.iat[0] - nom.iat[0]) if len(nom) and len(cal) else np.nan
+        if np.isfinite(gain) and gain >= cfg["WX_MIN_CSI_GAIN"]:
+            thr[ev] = float(q["value"].iat[0])
+            thr[f"{ev}_source"] = (f"skalibrowany na stacji {near['name']} ({n} dni ze zdarzeniem, "
+                                   f"CSI +{gain:.2f} na latach kalibracji)")
+        else:
+            thr[f"{ev}_source"] = (f"nominalny (kalibracja na stacji {near['name']} nie poprawia wyniku: "
+                                   f"CSI {'+' if gain >= 0 else ''}{gain:.2f})")
     return thr
 
 
@@ -317,7 +350,7 @@ def hazard_summary(hz: pd.DataFrame, cfg: Dict[str, Any], years: int = 5) -> pd.
     rows = []
     for y, d in g.groupby(g.index.year):
         rows.append({"year": int(y), "frost_days": int(d["frost"].sum()), "heat_days": int(d["heat"].sum()),
-                     "last_frost": d.index[d["frost"]].max().strftime("%d.%m") if d["frost"].any() else "",
+                     "last_frost": d.index[d["frost"]].max().strftime("%Y-%m-%d") if d["frost"].any() else "",
                      "min_tmin_spring": float(d.loc[in_season(d.index, cfg["FROST_SEASON"]), "tmin"].min()),
                      "max_tmax": float(d["tmax"].max())})
     return pd.DataFrame(rows)
@@ -347,7 +380,8 @@ def _selftest(out_dir: str) -> None:
     cfg = {"WX_VAL_START": "2016-01-01", "MF_MAX_KM": 30, "MF_MAX_STATIONS": 3, "MF_MIN_COVERAGE": 0.8,
            "FROST_SEASON": ("03-15", "05-15"), "FROST_TMIN": 0.0, "HEAT_SEASON": ("06-01", "08-31"),
            "HEAT_TMAX": 25.0, "WX_CAL_SPLIT_YEAR": 2021, "CLIM_REF": ("1991-01-01", "2020-12-31"),
-           "SPI_DAYS": (30, 90), "THR_SPI1": -2.0, "THR_SPI3": -1.0}
+           "SPI_DAYS": (30, 90), "THR_SPI1": -2.0, "THR_SPI3": -1.0,
+           "WX_REF_MAX_KM": 5.0, "WX_MIN_CAL_EVENTS": 10, "WX_MIN_TEST_EVENTS": 10, "WX_MIN_CSI_GAIN": 0.05}
     st = select_stations(mf, 43.94, 0.36, cfg)
     assert len(st) == 1 and st["dist_km"].iat[0] < 3
     # ERA5 = stacja + ciepły błąd Tmin 1,5 °C + szum; opad z szumem multiplikatywnym
@@ -356,8 +390,14 @@ def _selftest(out_dir: str) -> None:
     val = validate_weather(st, mf, {"32107001": era}, cfg)
     b = val[(val["product"] == "ERA5L_TMIN") & (val["metric"] == "bias") & (val["period"] == "all")]["value"].iat[0]
     assert abs(b - 1.5) < 0.1, b
-    thr = calibrated_thresholds(val, cfg)
+    thr = calibrated_thresholds(val, st, cfg)
     assert 0.5 <= thr["frost"] <= 2.5, thr                     # kalibracja przesuwa próg o ciepły błąd ERA5
+    assert thr["heat"] == 25.0 and thr["heat_source"].startswith("nominalny"), thr   # Tmax bez błędu: nominalny
+    rare = calibrated_thresholds(validate_weather(st, mf, {"32107001": era}, dict(cfg, HEAT_TMAX=38.0)), st,
+                                 dict(cfg, HEAT_TMAX=38.0))
+    assert rare["heat"] == 38.0 and rare["heat_source"].startswith("nominalny"), rare  # za mało upałów: bez kalibracji
+    far = calibrated_thresholds(val, st.assign(dist_km=12.0), cfg)
+    assert far["frost"] == 0.0 and far["reference"] == "", far  # stacja za daleko: progi nominalne
     r_spi = val[(val["product"] == "ERA5L_PRECIP") & (val["segment"] == "SPI3") & (val["metric"] == "pearson_r")]["value"].iat[0]
     assert r_spi > 0.8, r_spi
     hz = weather_hazards(era, cfg, thr)

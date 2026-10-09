@@ -138,6 +138,18 @@ dlatego A7 zamienia próg na prawdopodobieństwo.
 - D-045: Ostrzeżenie o glebie wyrażamy jako prawdopodobieństwo (PSMA, A7) z przedziałem niepewności, weryfikowane Brierem i diagramem niezawodności.
 - D-046: Produkty z asymilacją (SMAP L4, H SAF) testujemy jako członków PSMA w etapie B; własną asymilację (C5) budujemy dopiero po B.
 - D-047: Parametrów gleby nie kalibrujemy z S-1; kalibracja TAW wymaga obserwacji winorośli (ApeX, etap D).
+- D-048 (2026-10-09): Dane satelitarne wyłącznie z Copernicus (Sentinel-1/2/3, produkty CLMS i CEMS); bez Landsat,
+  MODIS, VIIRS. Termika: Sentinel-3 SLSTR LST 1 km z Copernicus Data Space, w natywnej rozdzielczości (bez wyostrzania
+  NDVI do detekcji: Agam i in. 2007/2008, wcześniejsza próba w v2.5). Dane niesatelitarne bez zmian (ERA5-Land, ISMN,
+  Météo-France, prognoza Open-Meteo).
+- D-049 (2026-10-09): Progi przymrozku i upału w winnicy kalibrujemy tylko na stacji Météo-France w promieniu 5 km
+  (Condom, 0,2 km). Próg skalibrowany wchodzi, gdy w latach < 2021 było >= 10 dni ze zdarzeniem i CSI na tych latach
+  rośnie o >= 0,05; inaczej próg nominalny (0 °C, 35 °C). Dalsze stacje tylko walidują ERA5. POD/FAR podajemy dla progu
+  używanego w produkcie i tylko przy >= 10 dniach ze zdarzeniem w latach testowych.
+- D-050 (2026-10-09): Wersja 1.2 „wiele dowodów”: (A) prezentacja — panel NDVI/NDRE/NDMI z ich walidacją, krzywa sezonu
+  na tle 5 lat, mapa anomalii, matryca sygnałów; (B) stres parowania ERA5-Land, termika S-3, radar S-1 jako panel,
+  reguła zgodności wskaźników; (C) SWI 1 km (CLMS) i porównanie z EDO CDI. Każdy nowy sygnał wchodzi do produktu tylko,
+  gdy na ISMN dodaje informację ponad obecne warstwy. Potem zamrożenie i opis do CV.
 
 ## 6. Najważniejsze źródła
 
