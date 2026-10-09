@@ -325,9 +325,10 @@ def build_status(era5_an: Dict[str, pd.DataFrame], veg: pd.DataFrame, site_id: s
     dk = pd.DataFrame({"day": days, "dekad": dekad_end(pd.Series(days))})
     sma = era5_an["ERA5L_SM_RZ"]["z"].reindex(days)
     dk["sma_rz"] = sma.to_numpy()
+    dk["sma_l1"] = era5_an["ERA5L_SM_L1"]["z"].reindex(days).to_numpy() if "ERA5L_SM_L1" in era5_an else np.nan
     for name, col in (("ERA5L_SPI1", "spi1"), ("ERA5L_SPI3", "spi3")):
         dk[col] = era5_an[name]["z"].reindex(days).to_numpy()
-    g = dk.groupby("dekad").agg(sma_rz=("sma_rz", "mean"), spi1=("spi1", "last"), spi3=("spi3", "last"),
+    g = dk.groupby("dekad").agg(sma_rz=("sma_rz", "mean"), sma_l1=("sma_l1", "mean"), spi1=("spi1", "last"), spi3=("spi3", "last"),
                                 n_days=("day", "size"))
     g = g[g.index <= days.max()]
 
@@ -358,7 +359,7 @@ def build_status(era5_an: Dict[str, pd.DataFrame], veg: pd.DataFrame, site_id: s
         p_soil = float(soil_drought_probability(r["sma_rz"], cfg.get("PSMA_RHO", 0.58), cfg["THR_SMA"])) \
             if np.isfinite(r["sma_rz"]) else np.nan
         rows.append({"site_id": site_id, "date": dk_end.strftime("%Y-%m-%d"), "cdi_level": level, "cdi_class": cls,
-                     "action": ACTION[cls], "spi1": r["spi1"], "spi3": r["spi3"], "sma_rz": r["sma_rz"],
+                     "action": ACTION[cls], "spi1": r["spi1"], "spi3": r["spi3"], "sma_rz": r["sma_rz"], "sma_l1": r["sma_l1"],
                      "p_soil_drought": p_soil,
                      "veg_z": veg_z, "veg_source": veg_src, "veg_age_days": veg_age, "confidence": conf,
                      "reason_codes": ";".join(reasons)})
@@ -388,8 +389,12 @@ def plot_season(status: pd.DataFrame, veg: pd.DataFrame, site_id: str, start: st
     fig, ax = plt.subplots(4, 1, figsize=(12, 9), sharex=True, gridspec_kw={"height_ratios": [1, 1, 1, 0.35]})
     ax[0].bar(st["date"], st["spi3"], width=8, color="tab:blue"); ax[0].axhline(-1, c="k", ls="--", lw=0.8)
     ax[0].set_ylabel("SPI-3")
-    ax[1].plot(st["date"], st["sma_rz"], c="tab:brown"); ax[1].axhline(-1, c="k", ls="--", lw=0.8)
-    ax[1].set_ylabel("Soil moisture\nanomaly 0-100 cm (z)")
+    ax[1].plot(st["date"], st["sma_rz"], c="tab:brown", label="0-100 cm (status)")
+    if "sma_l1" in st and st["sma_l1"].notna().any():
+        ax[1].plot(st["date"], st["sma_l1"], c="tab:orange", lw=0.7, alpha=0.6, label="0-7 cm (surface)")
+        ax[1].legend(fontsize=8)
+    ax[1].axhline(-1, c="k", ls="--", lw=0.8)
+    ax[1].set_ylabel("Soil moisture\nanomaly (z)")
     for prod, mk in (("S2_10m", "o"), ("S2SR_2.5m", "s")):
         p = vv[vv["product"] == prod] if len(vv) else vv
         if len(p):
@@ -443,6 +448,10 @@ def build_bulletin(status: pd.DataFrame, veg: pd.DataFrame, validation: pd.DataF
     png_now = plot_season(status, veg, sid, (last - pd.Timedelta(days=365)).strftime("%Y-%m-%d"),
                           last.strftime("%Y-%m-%d"), f"AgriWatch — {site['name']} — last 12 months",
                           os.path.join(out_dir, "last_12_months.png"), primary)
+    yrs = int(cfg.get("DASHBOARD_YEARS", 5))
+    png_years = plot_season(status, veg, sid, (last - pd.DateOffset(years=yrs)).strftime("%Y-%m-%d"),
+                            last.strftime("%Y-%m-%d"), f"AgriWatch — {site['name']} — last {yrs} years",
+                            os.path.join(out_dir, f"last_{yrs}_years.png"), primary)
     val = validation.copy() if validation is not None else pd.DataFrame()
 
     def clean(x):
@@ -456,7 +465,7 @@ def build_bulletin(status: pd.DataFrame, veg: pd.DataFrame, validation: pd.DataF
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "site": {k: clean(v) for k, v in site.items() if k != "geometry"},
         "current": {k: clean(v) for k, v in cur.items()},
-        "dekads": [{k: clean(v) for k, v in r.items()} for r in st.tail(108).to_dict("records")],
+        "dekads": [{k: clean(v) for k, v in r.items()} for r in st.tail(36 * yrs).to_dict("records")],
         "showcase_season": y,
         "sr_coverage": cfg.get("SR_COVERAGE"),
         "validation": [{k: clean(v) for k, v in r.items()} for r in val.to_dict("records")],
@@ -489,6 +498,8 @@ Generated {payload['generated_utc']} · status for the dekad ending **{cur['date
 
 ![last 12 months](last_12_months.png)
 
+![last {yrs} years](last_{yrs}_years.png)
+
 ## Showcase: season {y}
 
 ![season {y}](season_{y}.png)
@@ -508,4 +519,4 @@ soil-moisture anomaly for every parcel in the cell; parcel-specific information 
     md_path = os.path.join(out_dir, "bulletin.md")
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md)
-    return {"json": js, "markdown": md_path, "png_season": png_show, "png_recent": png_now}
+    return {"json": js, "markdown": md_path, "png_season": png_show, "png_recent": png_now, "png_years": png_years}

@@ -52,5 +52,6 @@ data/registry/*
 # AgriWatch v6: cache ERA5, SR, model, wyniki monitoringu
 data/02_ERA5_Land/
 data/03_SR_2.5m/
+data/08_MeteoFrance/
 data/models/
 data/_selftest_monitor/

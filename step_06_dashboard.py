@@ -7,7 +7,8 @@ Jeden samodzielny plik HTML dla jednej winnicy, wyświetlany w Colab i zapisywan
   ┌ Działka ────────┬ Mapa NDVI 2,5 m na zdjęciu satelitarnym ┬ Status (komunikat) ┬ Ryzyko suszy (wskaźnik) ┐
   │ nazwa, ha,      │ wybór daty sceny, obrys działki          ├ Pogoda: ostatnie 10 dni (ERA5-Land) + prognoza 7 dni ┤
   │ źródła, pewność │                                          ├ Przyczyny: SPI-1, SPI-3, gleba, roślinność, pewność  ┤
-  └─────────────────┴─ Wykres: ostatnie 12 miesięcy ─────────────┴─ Wiarygodność: walidacja na ISMN Condom ───────────┘
+  ├─────────────────┴─ Wykres: ostatnie 5 lat (DASHBOARD_YEARS) ─┴─ Wiarygodność: ISMN Condom + Météo-France ─────────┤
+  └ Przymrozki i upały (ERA5-Land, progi ze stacji MF) ┴ Tabela: ostatnie 5 lat (status, przymrozki, upały) ──────┘
 
 Różnica wobec Wago: zamiast zalecenia nawadniania („podlej 35 mm”) mówimy o anomalii wilgotności
 („sprawdź winnicę”). Dane wyłącznie z wyników zadań step_05 (status_dekads.csv, veg_anomalies.csv,
@@ -208,6 +209,38 @@ def _fmt(x, nd=1, suffix=""):
         return "—"
 
 
+def _weather_info(out_dir: str) -> Dict[str, Any]:
+    """Wyniki task_weather: progi, zdarzenia w winnicy per rok, linie wiarygodności (najbliższa stacja MF)."""
+    def rd(name):
+        q = os.path.join(out_dir, name)
+        return pd.read_csv(q) if os.path.exists(q) else pd.DataFrame()
+    val, per_year, stations = rd("validation_weather.csv"), rd("hazard_summary.csv"), rd("mf_stations.csv")
+    q = os.path.join(out_dir, "hazard_thresholds.json")
+    thr = json.load(open(q)) if os.path.exists(q) else {}
+    trust = []
+    if len(val) and len(stations):
+        near = f"MF_{str(stations.iloc[0]['num_poste'])}"
+        v = val[val["reference"].astype(str) == near]
+        name = v["subset"].iloc[0] if len(v) else ""
+        for prod, ev, label in (("ERA5L_TMIN", "frost_events", "Przymrozki wiosenne"),
+                                ("ERA5L_TMAX", "heat_events", "Upały")):
+            e = v[(v["product"] == prod) & (v["segment"] == ev) & v["period"].astype(str).str.contains("calibrated")]
+            pod, far = e[e["metric"] == "pod"], e[e["metric"] == "far"]
+            if len(pod) and len(far):
+                trust.append(f"{label} (ERA5-Land vs stacja Météo-France {name}, lata testowe): wykryte "
+                             f"{_fmt(100 * pod['value'].iat[0], 0)}%, fałszywe {_fmt(100 * far['value'].iat[0], 0)}%, "
+                             f"n = {int(pod['n'].iat[0])} dni ze zdarzeniem")
+        b = v[(v["product"] == "ERA5L_TMIN") & (v["segment"] == "daily") & (v["period"] == "season") & (v["metric"] == "bias")]
+        if len(b):
+            trust.append(f"Tmin wiosną: ERA5-Land różni się od stacji średnio o {_fmt(b['value'].iat[0], 1)} °C "
+                         f"(uwzględnione w progu przymrozku: {_fmt(thr.get('frost'), 2)} °C)")
+        s3 = v[(v["product"] == "ERA5L_PRECIP") & (v["segment"] == "SPI3") & (v["metric"] == "pearson_r")]
+        if len(s3):
+            trust.append(f"Niedobór opadu SPI-3 (ERA5-Land vs deszczomierz {name}): R = {_fmt(s3['value'].iat[0], 2)}, "
+                         f"n = {int(s3['n'].iat[0])} dni")
+    return {"thr": thr, "per_year": per_year, "trust": trust}
+
+
 # ==============================================================================
 # III. DASHBOARD
 # ==============================================================================
@@ -266,10 +299,20 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
     fc = fetch_forecast(c.y, c.x) if forecast else None
 
     # --- Wykres 12 miesięcy (z biuletynu) ---
+    yrs = int(cfg.get("DASHBOARD_YEARS", 5))
+    wx = _weather_info(out_dir)
     chart = ""
-    p = os.path.join(out_dir, "last_12_months.png")
+    p = os.path.join(out_dir, f"last_{yrs}_years.png")
+    if not os.path.exists(p):
+        p = os.path.join(out_dir, "last_12_months.png")
     if os.path.exists(p):
         chart = base64.b64encode(open(p, "rb").read()).decode()
+    # tabela ostatnich lat: dekady w klasach statusu + dni przymrozku i upału
+    st_y = st.assign(year=st["date"].str[:4].astype(int))
+    st_y = st_y[st_y["year"] > pd.Timestamp(cur["date"]).year - yrs]
+    years_tbl = st_y.pivot_table(index="year", columns="cdi_class", values="date", aggfunc="count", fill_value=0)
+    if len(wx["per_year"]):
+        years_tbl = years_tbl.join(wx["per_year"].set_index("year")[["frost_days", "heat_days"]], how="left")
 
     # --- Wiarygodność ---
     trust = []
@@ -296,6 +339,12 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
             trust.append(f"Anomalia NDVI winnicy ({cfg['VEG_PRODUCT']}, klimatologia z lat wcześniejszych) vs czujniki: "
                          f"R = {_fmt(r['value'], 2)} [{_fmt(r['ci_low'], 2)}; {_fmt(r['ci_high'], 2)}], n = {int(r['n'])} "
                          f"— pośrednio (stacja 136 m od winnicy, pod trawą)")
+        q = val[(val["product"] == "ERA5L_SM_L1") & (val["segment"] == "anomaly_clim")].dropna(subset=["value"])
+        if len(q):
+            r = q.sort_values("date_to").iloc[-1]                # bieżący czujnik 5 cm (po wymianie w 2019)
+            trust.append(f"Wierzchnia warstwa gleby 0–7 cm (ERA5-Land) vs czujnik 5 cm: R = {_fmt(r['value'], 2)} "
+                         f"[{_fmt(r['ci_low'], 2)}; {_fmt(r['ci_high'], 2)}], n = {int(r['n'])} dni")
+    trust += wx["trust"]
     trust.append("Alarm (gleba + roślinność) nie jest jeszcze zwalidowany na stanie wodnym winorośli")
 
     cov = sr_coverage(rt, cfg)
@@ -315,11 +364,12 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
                    "confidence": cur.get("confidence", ""), "gauge": GAUGE_LEVEL.get(cur["cdi_class"], 0.1),
                    "p_soil": cur.get("p_soil_drought")},
         "drivers": {"spi1": cur.get("spi1"), "spi3": cur.get("spi3"), "sma": cur.get("sma_rz"),
+                    "sma_l1": cur.get("sma_l1"),
                     "veg_z": cur.get("veg_z"), "veg_source": cur.get("veg_source"), "veg_age": cur.get("veg_age_days")},
         "layers": layers,
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     }
-    page = _render(payload, e, fc, chart, trust, cov, cfg)
+    page = _render(payload, e, fc, chart, trust, cov, cfg, wx, years_tbl)
     path = os.path.join(out_dir, "dashboard.html")
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
@@ -328,7 +378,8 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
 
 
 def _render(p: Dict[str, Any], era: pd.DataFrame, fc: Optional[pd.DataFrame], chart: str, trust: List[str],
-            cov: Dict[str, int], cfg: Dict[str, Any]) -> str:
+            cov: Dict[str, int], cfg: Dict[str, Any], wx: Optional[Dict[str, Any]] = None,
+            years_tbl: Optional[pd.DataFrame] = None) -> str:
     s, d = p["status"], p["drivers"]
     esc = html.escape
 
@@ -338,8 +389,40 @@ def _render(p: Dict[str, Any], era: pd.DataFrame, fc: Optional[pd.DataFrame], ch
         return (f'<div class="drv"><span>{name}</span><b style="color:{"#d63a2f" if bad else "#222"}">{v}</b>'
                 f'<small>{note}</small></div>')
 
-    era_rows = "".join(f"<tr><td>{r.time:%d.%m}</td><td>{_fmt(r.precip_mm, 1)}</td><td>{_fmt(r.t2m_c, 1)}</td></tr>"
+    era_rows = "".join(f"<tr><td>{r.time:%d.%m}</td><td>{_fmt(r.precip_mm, 1)}</td>"
+                       f"<td>{_fmt(getattr(r, 't2m_min_c', None), 1)}</td><td>{_fmt(getattr(r, 't2m_max_c', None), 1)}</td></tr>"
                        for r in era.itertuples())
+    # Przymrozki i upały: sezon bieżący (ERA5-Land, próg skalibrowany) + prognoza (próg nominalny, bez walidacji)
+    wx = wx or {"thr": {}, "per_year": pd.DataFrame()}
+    thr = {"frost": cfg["FROST_TMIN"], "heat": cfg["HEAT_TMAX"], **(wx.get("thr") or {})}
+    hz_html = ""
+    py = wx.get("per_year")
+    if py is not None and len(py):
+        r = py.sort_values("year").iloc[-1]
+        hz_html += (f'<div class="drv"><span>Przymrozki wiosenne {int(r["year"])}</span><b>{int(r["frost_days"])} dni</b>'
+                    f'<small>{"ostatni " + str(r["last_frost"]) if isinstance(r["last_frost"], str) and r["last_frost"] else ""}</small></div>'
+                    f'<div class="drv"><span>Upały ≥ {_fmt(cfg["HEAT_TMAX"], 0)} °C {int(r["year"])}</span>'
+                    f'<b>{int(r["heat_days"])} dni</b><small>Tmax sezonu {_fmt(r["max_tmax"], 1)} °C</small></div>')
+    if fc is not None and len(fc):
+        fr = fc[fc["tmin"] <= cfg["FROST_TMIN"]]
+        ht = fc[fc["tmax"] >= cfg["HEAT_TMAX"]]
+        fc_msg = "; ".join(x for x in (
+            ("przymrozek: " + ", ".join(f"{d:%d.%m}" for d in fr["date"])) if len(fr) else "",
+            ("upał: " + ", ".join(f"{d:%d.%m}" for d in ht["date"])) if len(ht) else "") if x) or "brak"
+        hz_html += f'<div class="drv"><span>Prognoza 7 dni</span><b>{esc(fc_msg)}</b></div>'
+    hz_html += (f'<div class="src">Przymrozek: Tmin ERA5-Land ≤ {_fmt(thr["frost"], 2)} °C w dniach '
+                f'{cfg["FROST_SEASON"][0]}–{cfg["FROST_SEASON"][1]} (próg dopasowany do stacji Météo-France; temperatura '
+                f'w klatce 2 m, pąki bywają 1–2 °C zimniejsze). Upał: Tmax ≥ {_fmt(thr["heat"], 1)} °C. Prognoza: progi nominalne, bez walidacji.</div>')
+    yt_html = ""
+    if years_tbl is not None and len(years_tbl):
+        names = {"alert": "Sprawdź", "warning": "Sucho", "watch": "Obserwuj", "recovery": "Powrót", "normal": "Norma",
+                 "frost_days": "Dni przymrozku", "heat_days": "Dni upału"}
+        cols = [c for c in ("alert", "warning", "watch", "recovery", "normal", "frost_days", "heat_days") if c in years_tbl]
+        head = "".join(f"<th>{names[c]}</th>" for c in cols)
+        body = "".join(f"<tr><td>{y}</td>" + "".join(f"<td>{'' if pd.isna(r[c]) else int(r[c])}</td>" for c in cols) + "</tr>"
+                       for y, r in years_tbl.sort_index(ascending=False).iterrows())
+        yt_html = (f'<table><tr><th>rok</th>{head}</tr>{body}</table>'
+                   f'<div class="src">Status: liczba dekad (10 dni) w każdej klasie. Przymrozki i upały: ERA5-Land w punkcie winnicy.</div>')
     fc_html = ""
     if fc is not None and len(fc):
         cells = "".join(f'<div class="fc"><b>{r.date:%a %d.%m}</b><span>{_fmt(r.tmax, 0)}° / {_fmt(r.tmin, 0)}°</span>'
@@ -409,14 +492,16 @@ ul{{padding-left:18px;font-size:12px;margin:4px 0}} .full{{grid-column:1/4}}
   <div class="card"><h3>Ryzyko suszy</h3>{_gauge_svg(s['gauge'], s['color'])}{p_soil_html}</div>
   <div class="card"><h3>Przyczyny (z-score, ≤ −1 = anomalia)</h3>
    {drv("Opad 30 dni (SPI-1)", d['spi1'], "próg −2")}{drv("Opad 90 dni (SPI-3)", d['spi3'], "próg −1")}
-   {drv("Wilgotność gleby 0–100 cm", d['sma'], "próg −1")}{drv("Roślinność winnicy (NDVI)", d['veg_z'], veg_note)}</div>
+   {drv("Wilgotność gleby 0–100 cm", d['sma'], "próg −1")}{drv("Wierzchnia warstwa 0–7 cm", d.get('sma_l1'), "informacyjnie")}{drv("Roślinność winnicy (NDVI)", d['veg_z'], veg_note)}</div>
  </div>
  <div class="card"><h3>Pogoda: ostatnie dni (ERA5-Land)</h3>
-  <table><tr><th>dzień</th><th>opad mm</th><th>T °C</th></tr>{era_rows}</table></div>
+  <table><tr><th>dzień</th><th>opad mm</th><th>Tmin °C</th><th>Tmax °C</th></tr>{era_rows}</table></div>
  <div class="card"><h3>Prognoza 7 dni</h3>{fc_html}</div>
  <div class="card"><h3>Wiarygodność (ISMN Condom)</h3><ul>{trust_html}</ul>
   <div class="src">Status oznacza „sprawdź winnicę”, nie diagnozę stresu wodnego winorośli. Umiarkowany niedobór wody bywa pożądany dla jakości.</div></div>
- <div class="card full"><h3>Ostatnie 12 miesięcy</h3>{f'<img src="data:image/png;base64,{chart}" style="width:100%">' if chart else '<div class="src">Wykres powstaje w task_bulletin.</div>'}</div>
+ <div class="card"><h3>Przymrozki i upały</h3>{hz_html}</div>
+ <div class="card" style="grid-column:2/4"><h3>Ostatnie {int(cfg.get("DASHBOARD_YEARS", 5))} lat</h3>{yt_html or '<div class="src">Brak danych.</div>'}</div>
+ <div class="card full"><h3>Ostatnie {int(cfg.get("DASHBOARD_YEARS", 5))} lat: opad, gleba, roślinność, status</h3>{f'<img src="data:image/png;base64,{chart}" style="width:100%">' if chart else '<div class="src">Wykres powstaje w task_bulletin.</div>'}</div>
 </div>
 <script>
 const D = {data_json};

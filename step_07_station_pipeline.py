@@ -1058,7 +1058,7 @@ def validate_anomalies(
 ) -> pd.DataFrame:
     """
     Zwraca wiersze gwl_validation_metrics (bez run_id):
-      1. ERA5-Land 0-7 cm vs czujnik 5 cm — R anomalii 35 dni (per segment czujnika),
+      1. ERA5-Land 0-7 cm vs czujnik 5 cm — R anomalii 35 dni i klimatologicznych (per segment czujnika),
       2. ERA5-Land 0-100 cm vs czujniki 20-30 cm — R anomalii klimatologicznych i 35-dniowych,
       3. anomalia NDVI/NDMI S-2 (10 m i SR 2,5 m; stacja i winnica) vs anomalia 20-30 cm w dniu sceny,
       4. wykrywanie susz: dekady z SMA <= -1 (produkt) vs dekady z anomalią 20-30 cm <= -1 (POD, FAR).
@@ -1095,6 +1095,13 @@ def validate_anomalies(
         r, lo, hi = _r_with_ci(pd.Series(p.index), p["x"].to_numpy(), p["y"].to_numpy(), cfg)
         add("ERA5L_SM_L1", f"ISMN_5cm_{seg}", "anomaly_35d", "ERA5 cell", "pearson_r", r, lo, hi, len(p),
             p.index.min(), p.index.max())
+        # anomalia klimatologiczna (ta, którą pokazuje dashboard): odniesienie = lata segmentu czujnika
+        seg_ref = (str(g.index.min().date()), str(g.index.max().date()))
+        p = pd.concat([clim_anomaly(era_l1, seg_ref, hw, min_n=20)["z"].rename("x"),
+                       clim_anomaly(g["sm"], seg_ref, hw, min_n=20)["z"].rename("y")], axis=1).dropna()
+        r, lo, hi = _r_with_ci(pd.Series(p.index), p["x"].to_numpy(), p["y"].to_numpy(), cfg)
+        add("ERA5L_SM_L1", f"ISMN_5cm_{seg}", "anomaly_clim", "ERA5 cell", "pearson_r", r, lo, hi, len(p),
+            p.index.min() if len(p) else None, p.index.max() if len(p) else None)
 
     # 2. 0-100 cm vs 20-30 cm: anomalie klimatologiczne (wspólny okres) i 35 dni
     ins_z = clim_anomaly(rz, common, hw, min_n=20)["z"]

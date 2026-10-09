@@ -75,7 +75,8 @@ REGISTRY_SCHEMA: Dict[str, Dict[str, List[str]]] = {
     },
     "gwl_status": {
         "keys": ["site_id", "date"],
-        "columns": ["site_id", "date", "cdi_level", "cdi_class", "action", "spi1", "spi3", "sma_rz", "veg_z",
+        "columns": ["site_id", "date", "cdi_level", "cdi_class", "action", "spi1", "spi3", "sma_rz", "sma_l1",
+                    "p_soil_drought", "veg_z",
                     "veg_source", "veg_age_days", "confidence", "reason_codes", "run_id"],
     },
     "gwl_runs": {
@@ -392,12 +393,25 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "SR_DIR": "data/03_SR_2.5m",
     "SHOWCASE_MONTHS": ["2022-07", "2022-08"],
     "SHOWCASE_SEASON": 2022,
+    # Zagrożenia pogodowe i walidacja na stacjach Météo-France (step_08)
+    "MF_DEPTS": ["32", "47"],             # Gers + Lot-et-Garonne (Condom leży przy granicy departamentów)
+    "MF_DIR": "data/08_MeteoFrance",
+    "MF_MAX_KM": 30,
+    "MF_MAX_STATIONS": 3,
+    "MF_MIN_COVERAGE": 0.8,               # udział dni z TN i TX od WX_VAL_START
+    "WX_VAL_START": "2016-01-01",
+    "WX_CAL_SPLIT_YEAR": 2021,            # próg ERA5 kalibrowany na latach < 2021, oceniany na latach >= 2021
+    "FROST_SEASON": ("03-15", "05-15"),   # po pąkowaniu winorośli w Gers (przymrozki wiosenne)
+    "FROST_TMIN": 0.0,                    # Tmin w klatce 2 m; pąki bywają 1-2 °C zimniejsze
+    "HEAT_SEASON": ("06-01", "08-31"),
+    "HEAT_TMAX": 35.0,
     # Wyniki
+    "DASHBOARD_YEARS": 5,                 # okno wykresów i historii na dashboardzie (od dziś wstecz)
     "OUTPUT_DIR": "data/05_Final_Outputs/agriwatch",
     "BOOTSTRAP_N": 1000,
 }
 
-_PATH_KEYS = ("PARCELS_PATH", "AOI_PATH", "ISMN_DIR", "S2_DIR", "S2_MANIFEST", "ERA5_DIR", "SR_MODEL_DIR",
+_PATH_KEYS = ("PARCELS_PATH", "AOI_PATH", "ISMN_DIR", "S2_DIR", "S2_MANIFEST", "ERA5_DIR", "SR_MODEL_DIR", "MF_DIR",
               "SR_DIR", "OUTPUT_DIR")
 
 
@@ -736,6 +750,52 @@ def task_validate(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     return {"message": msg, "registry": {"gwl_validation_metrics": val}}
 
 
+def task_weather(rt: Dict[str, Any], cfg: Dict[str, Any], fetch: bool = True) -> Dict[str, Any]:
+    """
+    Przymrozki i upały dla winnicy (ERA5-Land) + walidacja ERA5 (Tmin, Tmax, opad, SPI) na najbliższych stacjach
+    Météo-France. ERA5-Land jest pobierany w punkcie każdej stacji (cache). Wyniki: validation_weather.csv,
+    weather_hazards.csv, hazard_summary.csv; metryki do gwl_validation_metrics.
+    """
+    import step_01_ingest as s1
+    import step_08_weather as s8
+    os.makedirs(cfg["OUTPUT_DIR"], exist_ok=True)
+    lon, lat = _main_site_lonlat(cfg)
+    paths = s8.download_mf(cfg["MF_DEPTS"], cfg["MF_DIR"]) if fetch else \
+        sorted(glob.glob(os.path.join(cfg["MF_DIR"], "Q_*_RR-T-Vent.csv.gz")))
+    mf = s8.read_mf(paths, cfg["CLIM_REF"][0])
+    stations = s8.select_stations(mf, lat, lon, cfg) if len(mf) else pd.DataFrame()
+    era_by = {}
+    end = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
+    for st in stations.itertuples():
+        cache = os.path.join(cfg["MF_DIR"], f"era5_{st.num_poste}")
+        if fetch:
+            era_by[st.num_poste] = s1.sync_era5_land_point(st.lat, st.lon, cfg["CLIM_REF"][0], end, cache)
+        elif os.path.isdir(cache):
+            fr = [pd.read_csv(p, parse_dates=["time"]) for p in sorted(glob.glob(os.path.join(cache, "*.csv")))]
+            era_by[st.num_poste] = pd.concat(fr, ignore_index=True).drop_duplicates("time") if fr else pd.DataFrame()
+    val = s8.validate_weather(stations, mf, era_by, cfg) if len(stations) else pd.DataFrame()
+    val.to_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_weather.csv"), index=False)
+    stations.to_csv(os.path.join(cfg["OUTPUT_DIR"], "mf_stations.csv"), index=False)
+
+    era5 = pd.read_csv(_era5_csv(cfg), parse_dates=["time"])
+    thr = s8.calibrated_thresholds(val, cfg)
+    if "t2m_max_c" not in era5:
+        era5["t2m_max_c"] = np.nan
+    hz = s8.weather_hazards(era5, cfg, thr)
+    hz.to_csv(os.path.join(cfg["OUTPUT_DIR"], "weather_hazards.csv"))
+    summ = s8.hazard_summary(hz, cfg, cfg["DASHBOARD_YEARS"])
+    summ.to_csv(os.path.join(cfg["OUTPUT_DIR"], "hazard_summary.csv"), index=False)
+    with open(os.path.join(cfg["OUTPUT_DIR"], "hazard_thresholds.json"), "w") as f:
+        json.dump(thr, f)
+    msg = (f"{len(stations)} stacji MF ({', '.join(f'{r.name} {r.dist_km:.0f} km' for r in stations.itertuples())}); "
+           f"progi ERA5: przymrozek Tmin ≤ {thr['frost']:+.2f} °C, upał Tmax ≥ {thr['heat']:.2f} °C; "
+           f"{len(val)} metryk")
+    out = {"message": msg}
+    if len(val):
+        out["registry"] = {"gwl_validation_metrics": val}
+    return out
+
+
 def task_bulletin(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Biuletyn dla winnicy: bulletin.md, wykresy, agriwatch_latest.json (do publikacji na stronie)."""
     import step_04_metrics_alert as s4
@@ -809,6 +869,14 @@ def task_summary(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     val = pd.read_csv(vpath) if os.path.exists(vpath) else pd.DataFrame()
     runs = run_history(rt, n=15)
 
+    def csv_or_empty(name):
+        q = os.path.join(out, name)
+        return pd.read_csv(q) if os.path.exists(q) else pd.DataFrame()
+    wval, hsum, mfst = (csv_or_empty("validation_weather.csv"), csv_or_empty("hazard_summary.csv"),
+                        csv_or_empty("mf_stations.csv"))
+    thr_path = os.path.join(out, "hazard_thresholds.json")
+    thr = json.load(open(thr_path)) if os.path.exists(thr_path) else {}
+
     summary = {
         "generated_utc": _utc_now(), "git_commit": rt.get("GIT_COMMIT", ""), "device": gpu,
         "versions": {p: ver(p) for p in ("numpy", "pandas", "rasterio", "geopandas", "earthengine-api", "torch",
@@ -821,6 +889,9 @@ def task_summary(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
                  "s2_last": os.path.basename(scenes[-1])[7:15] if scenes else None, "era5_last_day": era5_last},
         "sr": sr, "status_current": current, "status_per_year": status,
         "validation": val.round(3).to_dict(orient="records") if len(val) else [],
+        "weather": {"stations": mfst.round(3).to_dict(orient="records"), "thresholds": thr,
+                    "validation": wval.round(3).to_dict(orient="records") if len(wval) else [],
+                    "hazards_per_year": hsum.round(1).to_dict(orient="records") if len(hsum) else []},
         "runs": runs.to_dict(orient="records"),
     }
     js = os.path.join(out, "run_summary.json")
@@ -857,6 +928,17 @@ Commit `{summary['git_commit']}` · urządzenie: {gpu} · sen2sr {summary['versi
 ## Walidacja
 {table(val.round(3)) if len(val) else "(brak)"}
 
+## Pogoda: stacje Météo-France i walidacja ERA5-Land
+Stacje:
+{table(mfst.round(3))}
+
+Progi ERA5 dla zagrożeń: {json.dumps(thr)}
+
+{table(wval.drop(columns=[c for c in ("site_id", "ci_low", "ci_high", "date_from", "date_to") if c in wval]).round(3)) if len(wval) else "(brak)"}
+
+## Zagrożenia pogodowe w winnicy (ERA5-Land, progi skalibrowane)
+{table(hsum.round(1))}
+
 ## Ostatnie uruchomienia
 {table(runs)}
 """
@@ -875,6 +957,7 @@ def run_monitoring(rt: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None, ing
     run_task(rt, "scene_stats", task_scene_stats, rt, cfg)
     run_task(rt, "anomalies", task_anomalies, rt, cfg)
     run_task(rt, "validate", task_validate, rt, cfg)
+    run_task(rt, "weather", task_weather, rt, cfg, fetch=ingest)
     run_task(rt, "bulletin", task_bulletin, rt, cfg)
     run_task(rt, "dashboard", task_dashboard, rt, cfg)
     run_task(rt, "summary", task_summary, rt, cfg)
@@ -897,7 +980,7 @@ def _selftest(out_dir: str) -> None:
     cfg = monitor_config(rt, {"S2_DIR": os.path.join(out_dir, "s2"), "ERA5_DIR": os.path.join(out_dir, "era5"),
                               "OUTPUT_DIR": os.path.join(out_dir, "out"), "SR_DIR": os.path.join(out_dir, "sr"),
                               "BOOTSTRAP_N": 200, "USE_SR": True, "SR_MAX_SCENES_PER_RUN": None,
-                              "SR_MODEL_DIR": os.path.join(out_dir, "model")})
+                              "SR_MODEL_DIR": os.path.join(out_dir, "model"), "MF_DIR": os.path.join(out_dir, "mf")})
     rng = np.random.default_rng(1)
 
     # Syntetyczne ERA5-Land 1991-2024: cykl roczny + szum AR(1); opad gamma
@@ -909,9 +992,20 @@ def _selftest(out_dir: str) -> None:
         ar[i] = 0.97 * ar[i - 1] + rng.normal(0, 0.01)
     era5 = pd.DataFrame({"time": days, "sm_l1": 0.25 + 0.08 * seas + ar, "sm_l2": 0.27 + 0.06 * seas + 0.8 * ar,
                          "sm_l3": 0.30 + 0.04 * seas + 0.6 * ar, "precip_mm": rng.gamma(0.4, 6.0, len(days)),
-                         "t2m_min_c": 8 - 6 * seas, "t2m_c": 13 - 7 * seas})
+                         "t2m_min_c": 8 - 6 * seas + rng.normal(0, 3, len(days)), "t2m_c": 13 - 7 * seas,
+                         "t2m_max_c": 18 - 9 * seas + rng.normal(0, 3, len(days))})
     os.makedirs(cfg["ERA5_DIR"], exist_ok=True)
     era5.to_csv(_era5_csv(cfg), index=False)
+    # Syntetyczna stacja Météo-France 5 km od winnicy (Tmin 1 °C chłodniej niż ERA5) + ERA5 w jej punkcie (cache)
+    import gzip
+    os.makedirs(os.path.join(cfg["MF_DIR"], "era5_32999001"), exist_ok=True)
+    mf = pd.DataFrame({"NUM_POSTE": "32999001", "NOM_USUEL": "SELFTEST", "LAT": 43.98, "LON": 0.37, "ALTI": 100,
+                       "AAAAMMJJ": days.strftime("%Y%m%d").astype(int), "RR": (era5["precip_mm"] * 1.1).round(1),
+                       "QRR": 1, "TN": (era5["t2m_min_c"] - 1 + rng.normal(0, 1, len(days))).round(1), "QTN": 1,
+                       "TX": (era5["t2m_max_c"] + rng.normal(0, 1, len(days))).round(1), "QTX": 1})
+    with gzip.open(os.path.join(cfg["MF_DIR"], "Q_32_previous-1950-2023_RR-T-Vent.csv.gz"), "wt") as f:
+        mf.to_csv(f, sep=";", index=False)
+    era5.to_csv(os.path.join(cfg["MF_DIR"], "era5_32999001", "era5land_19910101_20250101.csv"), index=False)
     ar_s = pd.Series(ar, index=days)
 
     # Syntetyczne sceny S-2 (12 pasm jak w step_01) na siatce obejmującej winnicę i stację
@@ -988,7 +1082,8 @@ def _selftest(out_dir: str) -> None:
     s3.super_resolve = fake_super_resolve
     try:
         for name, fn in (("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
-                         ("validate", task_validate), ("bulletin", task_bulletin),
+                         ("validate", task_validate),
+                         ("weather", lambda r, c: task_weather(r, c, fetch=False)), ("bulletin", task_bulletin),
                          ("dashboard", lambda r, c: task_dashboard(r, c, forecast=False)),
                          ("summary", task_summary)):
             run_task(rt, name, fn, rt, cfg, raise_errors=True)
@@ -1013,6 +1108,13 @@ def _selftest(out_dir: str) -> None:
     dash = open(os.path.join(cfg["OUTPUT_DIR"], "dashboard.html"), encoding="utf-8").read()
     n_layers = dash.count('"png": "')
     assert "Ryzyko suszy" in dash and "L.imageOverlay" in dash and n_layers >= 5, n_layers
+    assert "Przymrozki i upały" in dash and "Météo-France" in dash and "Ostatnie 5 lat" in dash
+    wv = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_weather.csv"))
+    b = wv[(wv["product"] == "ERA5L_TMIN") & (wv["period"] == "all") & (wv["metric"] == "bias")]["value"].iat[0]
+    assert abs(b - 1.0) < 0.1, b                    # ERA5 cieplejsze o 1 °C od stacji
+    thr = json.load(open(os.path.join(cfg["OUTPUT_DIR"], "hazard_thresholds.json")))
+    assert 0.0 < thr["frost"] < 2.0, thr
+    print(f"[OK] Pogoda: {len(wv)} metryk MF, progi {thr}")
     print(f"[OK] Dashboard: {n_layers} dat mapy NDVI, {len(dash) // 1024} kB")
     summ = json.load(open(os.path.join(cfg["OUTPUT_DIR"], "run_summary.json"), encoding="utf-8"))
     assert summ["sr"]["scenes_checked"] == 126 and summ["status_current"] and summ["validation"], summ["sr"]

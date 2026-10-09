@@ -355,11 +355,12 @@ ERA5_LAND_BANDS = {
     "total_precipitation_sum": "precip_mm",
     "temperature_2m_min": "t2m_min_c",
     "temperature_2m": "t2m_c",
+    "temperature_2m_max": "t2m_max_c",
 }
 
 
 def fetch_era5_land_daily(lat: float, lon: float, start: str, end: str) -> "pd.DataFrame":
-    """ERA5-Land DAILY_AGGR (GEE) w punkcie [start, end): wilgotność 3 warstw [m3/m3], opad [mm], T [°C]."""
+    """ERA5-Land DAILY_AGGR (GEE) w punkcie [start, end): wilgotność 3 warstw [m3/m3], opad [mm], T, Tmin, Tmax [°C]."""
     import pandas as pd
     col = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR").filterDate(start, end).select(list(ERA5_LAND_BANDS))
     rows = col.getRegion(ee.Geometry.Point([lon, lat]), 11132).getInfo()
@@ -394,8 +395,11 @@ def sync_era5_land_point(
     while a < stop:
         b = min(a + pd.DateOffset(months=chunk_months), stop)
         path = os.path.join(cache_dir, f"era5land_{a:%Y%m%d}_{b:%Y%m%d}.csv")
-        if os.path.exists(path) and b < now - pd.Timedelta(days=refetch_days):
-            frames.append(pd.read_csv(path, parse_dates=["time"]))
+        cached = pd.read_csv(path, parse_dates=["time"]) if os.path.exists(path) else None
+        # fragment z cache bez którejś zmiennej (np. dodanej później Tmax) jest pobierany ponownie
+        if (cached is not None and b < now - pd.Timedelta(days=refetch_days)
+                and set(ERA5_LAND_BANDS.values()) <= set(cached.columns)):
+            frames.append(cached)
         else:
             logger.info(f"ERA5-Land: pobieranie {a:%Y-%m-%d} -> {b:%Y-%m-%d}")
             df = fetch_era5_land_daily(lat, lon, f"{a:%Y-%m-%d}", f"{b:%Y-%m-%d}")

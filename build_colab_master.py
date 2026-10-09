@@ -50,7 +50,7 @@ print('Projekt:', PROJECT_DIR)"""),
     ("md", "## 2. Środowisko: pakiety, GEE, rejestr, konfiguracja"),
     ("code", """from step_05_colab_run import (setup_runtime, monitor_config, run_task, run_history, registry_summary,
                                task_ingest_s2, task_ingest_era5, task_scene_stats, task_anomalies,
-                               task_validate, task_bulletin, task_dashboard, task_summary)
+                               task_validate, task_weather, task_bulletin, task_dashboard, task_summary)
 from step_06_dashboard import show_dashboard
 rt = setup_runtime(PROJECT_DIR, gee_project='ee-geoworldlook', pull=False)
 cfg = monitor_config(rt)   # zmiany: monitor_config(rt, {'VINEYARDS': {'VINEYARD_06': 6, 'VINEYARD_07': 7}})"""),
@@ -59,9 +59,13 @@ cfg = monitor_config(rt)   # zmiany: monitor_config(rt, {'VINEYARDS': {'VINEYARD
 run_task(rt, 'ingest_era5', task_ingest_era5, rt, cfg)"""),
     ("md", "## 4. Indeksy winnicy i stacji: 10 m oraz SEN2SR 2,5 m (kontrola H-SR0/H-SR1, bez zastępstwa interpolacją)"),
     ("code", "run_task(rt, 'scene_stats', task_scene_stats, rt, cfg)"),
-    ("md", "## 5. Anomalie, status, walidacja i biuletyn"),
+    ("md", """## 5. Anomalie, status, walidacja, przymrozki i upały, biuletyn
+`weather`: dane dobowe Météo-France (Gers, Lot-et-Garonne) i ERA5-Land w punktach najbliższych stacji — walidacja
+Tmin, Tmax, opadu i SPI oraz kalibracja progów przymrozku i upału. Pierwsze uruchomienie pobiera ERA5 dla stacji
+(kilka minut), kolejne korzystają z cache."""),
     ("code", """run_task(rt, 'anomalies', task_anomalies, rt, cfg)
 run_task(rt, 'validate', task_validate, rt, cfg)
+run_task(rt, 'weather', task_weather, rt, cfg)
 run_task(rt, 'bulletin', task_bulletin, rt, cfg)"""),
     ("md", """## 6. Dashboard winnicy
 Mapa NDVI na zdjęciu satelitarnym (wybór daty), status, ryzyko suszy, przyczyny, pogoda i prognoza, wiarygodność.
