@@ -371,6 +371,12 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "VEG_MIN_REF": 5,
     "VEG_MIN_CLEAR_FRAC": 0.9,
     "VEG_MAX_AGE_DAYS": 30,
+    "VEG_CAUSAL": True,                   # klimatologia tylko z lat wcześniejszych (Plan v7 A1)
+    "VEG_BY_TRACK": True,                 # odniesienie z tego samego toru orbity S-2 (A2)
+    "VEG_PREDICTIVE_Z": True,             # z predykcyjne z rozkładu t (A3)
+    "VEG_REF_YEARS": 5,                   # klimatologia z ostatnich 5 lat wcześniejszych (trend zarządzania międzyrzędziem)
+    # Prawdopodobieństwo suszy gleby (A7): korelacja anomalii ERA5-Land 0-100 cm z ISMN Condom 20-30 cm
+    "PSMA_RHO": 0.58,
     # Progi statusu (EDO CDI)
     "THR_SPI1": -2.0, "THR_SPI3": -1.0, "THR_SMA": -1.0, "THR_VEG": -1.0,
     "STATUS_START": "2016-01-01",
@@ -695,7 +701,8 @@ def task_anomalies(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
             rows.append({"site_id": "AOI_ERA5L", "product": name, "date": dk.strftime("%Y-%m-%d"),
                          "value": r["value"], "clim_mean": r["clim_mean"], "z": r["z"],
                          "percentile": r["percentile"], "clim_id": clim_id})
-    veg_clim = f"other_years_doy{cfg['VEG_HALF_WINDOW_DAYS']}"
+    veg_clim = (f"{'prior' if cfg.get('VEG_CAUSAL', True) else 'other'}_years_doy{cfg['VEG_HALF_WINDOW_DAYS']}"
+                f"{'_track' if cfg.get('VEG_BY_TRACK', True) else ''}{'_tz' if cfg.get('VEG_PREDICTIVE_Z', True) else ''}")
     for r in veg.itertuples():
         rows.append({"site_id": r.site_id, "product": f"{r.product}_{r.index.upper()}",
                      "date": pd.Timestamp(r.time).strftime("%Y-%m-%d"), "value": r.value,

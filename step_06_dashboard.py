@@ -287,10 +287,16 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
         if len(q[q["metric"] == "pod"]) and len(q[q["metric"] == "far"]):
             pod = q[q["metric"] == "pod"]["value"].iloc[0]
             far = q[q["metric"] == "far"]["value"].iloc[0]
-            trust.append(f"Suche dekady: wykryte {_fmt(100 * pod, 0)}%, fałszywe sygnały {_fmt(100 * far, 0)}%")
+            n_dk = int(q["n"].iloc[0]) if "n" in q and pd.notna(q["n"].iloc[0]) else None
+            trust.append(f"Suche dekady (warstwa gleby ERA5-Land{'' if n_dk is None else f', n = {n_dk} dekad'}): "
+                         f"wykryte {_fmt(100 * pod, 0)}%, fałszywe sygnały {_fmt(100 * far, 0)}% — granica wynikająca "
+                         f"z korelacji ERA5 z czujnikiem, dlatego status podaje też prawdopodobieństwo")
         r = pick(cfg["VEG_PRODUCT"] + "_NDVI", "anomaly_clim", "vineyard")
         if r is not None:
-            trust.append(f"Anomalia NDVI winnicy ({cfg['VEG_PRODUCT']}) vs czujniki: R = {_fmt(r['value'], 2)}, n = {int(r['n'])}")
+            trust.append(f"Anomalia NDVI winnicy ({cfg['VEG_PRODUCT']}, klimatologia z lat wcześniejszych) vs czujniki: "
+                         f"R = {_fmt(r['value'], 2)} [{_fmt(r['ci_low'], 2)}; {_fmt(r['ci_high'], 2)}], n = {int(r['n'])} "
+                         f"— pośrednio (stacja 136 m od winnicy, pod trawą)")
+    trust.append("Alarm (gleba + roślinność) nie jest jeszcze zwalidowany na stanie wodnym winorośli")
 
     cov = sr_coverage(rt, cfg)
     label, meaning, color = STATUS_PL.get(cur["cdi_class"], (cur["cdi_class"], "", "#888"))
@@ -306,7 +312,8 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
                  "lat": round(c.y, 5), "lon": round(c.x, 5), "geometry": mapping(geom_ll)},
         "status": {"code": cur["cdi_class"], "label": label, "meaning": meaning, "color": color,
                    "date": cur["date"], "since": run_start, "n_dekads": n_dk,
-                   "confidence": cur.get("confidence", ""), "gauge": GAUGE_LEVEL.get(cur["cdi_class"], 0.1)},
+                   "confidence": cur.get("confidence", ""), "gauge": GAUGE_LEVEL.get(cur["cdi_class"], 0.1),
+                   "p_soil": cur.get("p_soil_drought")},
         "drivers": {"spi1": cur.get("spi1"), "spi3": cur.get("spi3"), "sma": cur.get("sma_rz"),
                     "veg_z": cur.get("veg_z"), "veg_source": cur.get("veg_source"), "veg_age": cur.get("veg_age_days")},
         "layers": layers,
@@ -344,6 +351,10 @@ def _render(p: Dict[str, Any], era: pd.DataFrame, fc: Optional[pd.DataFrame], ch
 
     opts = "".join(f'<option value="{i}">{esc(ly["date"])} · {"2,5 m SR" if ly["product"] == "S2SR_2.5m" else "10 m"}</option>'
                    for i, ly in enumerate(p["layers"]))
+    ps = s.get("p_soil")
+    p_soil_html = (f'<div class="src">Prawdopodobieństwo suszy w glebie (czujnik 20–30 cm, z ≤ −1): '
+                   f'<b>{100 * float(ps):.0f}%</b> — z anomalii ERA5-Land i jej zgodności z ISMN Condom</div>'
+                   if ps is not None and np.isfinite(float(ps)) else "")
     trust_html = "".join(f"<li>{esc(t)}</li>" for t in trust) or "<li>Brak wyników walidacji (uruchom task_validate).</li>"
     veg_note = (f"{d['veg_source']}, scena sprzed {int(d['veg_age'])} dni"
                 if d.get("veg_source") and d.get("veg_age") is not None and np.isfinite(float(d["veg_age"]))
@@ -395,7 +406,7 @@ ul{{padding-left:18px;font-size:12px;margin:4px 0}} .full{{grid-column:1/4}}
   <div class="card status"><h3>Stan na {esc(str(s['date']))}</h3>
    <div class="lbl">{esc(s['label'])}</div><div style="font-size:13px;margin:6px 0">{esc(s['meaning'])}</div>
    <div class="src">od {esc(str(s['since']))} ({s['n_dekads']} dekad) · pewność: {esc(str(s['confidence']))}</div></div>
-  <div class="card"><h3>Ryzyko suszy</h3>{_gauge_svg(s['gauge'], s['color'])}</div>
+  <div class="card"><h3>Ryzyko suszy</h3>{_gauge_svg(s['gauge'], s['color'])}{p_soil_html}</div>
   <div class="card"><h3>Przyczyny (z-score, ≤ −1 = anomalia)</h3>
    {drv("Opad 30 dni (SPI-1)", d['spi1'], "próg −2")}{drv("Opad 90 dni (SPI-3)", d['spi3'], "próg −1")}
    {drv("Wilgotność gleby 0–100 cm", d['sma'], "próg −1")}{drv("Roślinność winnicy (NDVI)", d['veg_z'], veg_note)}</div>

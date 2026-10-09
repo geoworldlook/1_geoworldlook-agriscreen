@@ -46,6 +46,14 @@ Dokładanie kolejnych wskaźników spektralnych nie spełnia żadnego z tych war
 
 ### Etap A — poprawność obecnych warstw (v1.1; ok. 7 dni; bez nowych danych)
 
+**Stan 2026-10-09 — wdrożone w kodzie:** A1 (klimatologia z ostatnich 5 lat wcześniejszych, `VEG_CAUSAL`, `VEG_REF_YEARS`),
+A2 (odniesienie z tego samego toru orbity, `track_ids`, `VEG_BY_TRACK`), A3 (z predykcyjne z rozkładu t, `VEG_PREDICTIVE_Z`),
+A7 w wersji jednoźródłowej (`soil_drought_probability`, kolumna `p_soil_drought` w statusie, `PSMA_RHO` = 0,58), A6 (dashboard: prawdopodobieństwo,
+CI, dopiski o pośredniości i braku walidacji alarmu). Sprawdzenie na danych z rejestru (VINEYARD_06, SR 2,5 m, ISMN 20–30 cm):
+NDVI R 0,434 (v1.0, retrospektywnie) → 0,344 [0,14; 0,53] operacyjnie; prawdopodobieństwo suszy gleby: Brier 0,101 vs 0,172 reguły tak/nie
+i 0,128 klimatologii, niezawodność dobra (p ≈ 0,55 → zaobserwowane 0,54). Alarmy: 2022 — 10 dekad, 2023 — 1, 2026 — 12;
+2017 i 2019 bez alarmu (za krótka historia przed danym rokiem), zostają jako ostrzeżenia. Do zrobienia: A4, A5.
+
 | Krok | Co | Kryterium akceptacji |
 |---|---|---|
 | A1 | Klimatologia przyczynowa roślinności (tylko lata wcześniejsze, min. 3 lata) w `step_04`; raportowanie skuteczności operacyjnej obok retrospektywnej. Trend obsłużony anomalią względem **innych winnic AOI z tej samej sceny** (różnica krzyżowa: „ta winnica vs sąsiedzi”) — wymaga statystyk dla wszystkich 15 winnic w `task_scene_stats` (klipy już powstają) | dashboard pokazuje liczby operacyjne; warstwa krzyżowa liczona dla 15 winnic |

@@ -221,27 +221,81 @@ def era5_anomalies(era5: pd.DataFrame, cfg: Dict[str, Any]) -> Dict[str, pd.Data
     return out
 
 
+def track_ids(t: pd.Series, min_sep_min: float = 5.0) -> np.ndarray:
+    """Tor orbity S-2 z godziny akwizycji: nad stałym punktem sąsiednie orbity względne przelatują o różnej porze
+    (nad Condom ~10:59 i ~11:09 UTC, z rozrzutem kilku minut w archiwum). Podział na dwie grupy progiem Otsu
+    na minutach doby; gdy średnie grup różnią się o mniej niż min_sep_min minut — jeden tor."""
+    mins = (t.dt.hour * 60 + t.dt.minute + t.dt.second / 60).to_numpy(float)
+    u = np.sort(np.unique(mins))
+    if len(u) < 2:
+        return np.zeros(len(mins), int)
+    best, thr = -1.0, None
+    for cut in (u[:-1] + u[1:]) / 2:
+        a, b = mins[mins <= cut], mins[mins > cut]
+        score = len(a) * len(b) * (a.mean() - b.mean()) ** 2
+        if score > best:
+            best, thr = score, cut
+    lo, hi = mins[mins <= thr], mins[mins > thr]
+    if hi.mean() - lo.mean() < min_sep_min:
+        return np.zeros(len(mins), int)
+    return (mins > thr).astype(int)
+
+
 def scene_anomaly(df: pd.DataFrame, col: str, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Anomalia roślinności dla nieregularnych scen S-2: dla sceny z roku Y odniesieniem są sceny z INNYCH
-    lat (±VEG_HALF_WINDOW_DAYS dni roku) — klimatologia bez danego roku (krótka seria od 2016).
+    Anomalia roślinności dla nieregularnych scen S-2 względem scen z ±VEG_HALF_WINDOW_DAYS dni roku.
+    Domyślnie (Plan v7, A1–A3):
+      - VEG_CAUSAL: tylko lata WCZEŚNIEJSZE (tak, jak system działałby w danym dniu; trend NDVI winnicy
+        sprawiał, że klimatologia z „pozostałych lat” zawyżała zgodność z gruntem: R 0,50 → 0,29 na tych samych dniach);
+      - VEG_BY_TRACK: odniesienie z tego samego toru orbity (różnica średnich z między torami ~0,4 na winnicy,
+        geometria rzędów); gdy scen z toru za mało — wszystkie tory (ref_mode = "all_tracks");
+      - VEG_PREDICTIVE_Z: z predykcyjne z rozkładu t-Studenta (krótka historia, n_ref 5–30),
+        żeby częstość z <= -1 odpowiadała rozkładowi normalnemu (było 19,6% zamiast 15,9%).
     Tylko sceny z udziałem pikseli czystych >= VEG_MIN_CLEAR_FRAC.
     """
+    from scipy import stats
+
     d = df[(df["clear_frac"] >= cfg["VEG_MIN_CLEAR_FRAC"]) & df[col].notna()].sort_values("time").copy()
     if d.empty:
-        return d.assign(clim_mean=np.nan, clim_std=np.nan, z=np.nan, n_ref=0)
+        return d.assign(clim_mean=np.nan, clim_std=np.nan, z=np.nan, n_ref=0, track=0, ref_mode="")
+    causal, by_track = cfg.get("VEG_CAUSAL", True), cfg.get("VEG_BY_TRACK", True)
     doy, yr, v = d["time"].dt.dayofyear.to_numpy(), d["time"].dt.year.to_numpy(), d[col].to_numpy(float)
-    mu, sd, n = [], [], []
+    trk = track_ids(d["time"])
+    mu, sd, n, mode = [], [], [], []
     for i in range(len(d)):
-        m = (yr != yr[i]) & (_circ_doy_dist(doy, doy[i]) <= cfg["VEG_HALF_WINDOW_DAYS"])
+        m = (yr < yr[i]) if causal else (yr != yr[i])
+        if causal and cfg.get("VEG_REF_YEARS"):
+            m &= yr >= yr[i] - cfg["VEG_REF_YEARS"]
+        m &= _circ_doy_dist(doy, doy[i]) <= cfg["VEG_HALF_WINDOW_DAYS"]
+        ref = "all_tracks"
+        if by_track and (m & (trk == trk[i])).sum() >= cfg["VEG_MIN_REF"]:
+            m, ref = m & (trk == trk[i]), "same_track"
         pool = v[m]
         ok = len(pool) >= cfg["VEG_MIN_REF"]
         mu.append(pool.mean() if ok else np.nan)
         sd.append(pool.std(ddof=1) if ok else np.nan)
         n.append(len(pool))
-    d["clim_mean"], d["clim_std"], d["n_ref"] = mu, sd, n
-    d["z"] = (d[col] - d["clim_mean"]) / d["clim_std"]
+        mode.append(ref if ok else "")
+    d["clim_mean"], d["clim_std"], d["n_ref"], d["track"], d["ref_mode"] = mu, sd, n, trk, mode
+    if cfg.get("VEG_PREDICTIVE_Z", True):
+        nn = d["n_ref"].to_numpy(float)
+        t = (d[col] - d["clim_mean"]).to_numpy() / (d["clim_std"].to_numpy() * np.sqrt(1 + 1 / np.maximum(nn, 1)))
+        d["z"] = stats.norm.ppf(np.clip(stats.t.cdf(t, df=np.maximum(nn - 1, 1)), 1e-6, 1 - 1e-6))
+        d.loc[~np.isfinite(t), "z"] = np.nan
+    else:
+        d["z"] = (d[col] - d["clim_mean"]) / d["clim_std"]
     return d
+
+
+def soil_drought_probability(z: np.ndarray, rho: float, c: float = -1.0) -> np.ndarray:
+    """
+    Prawdopodobieństwo, że wilgotność gleby mierzona w gruncie jest w anomalii z <= c, gdy anomalia ERA5-Land
+    wynosi z (model dwuwymiarowy normalny, korelacja produktu z gruntem rho; F5 §5, Plan v7 A7).
+    Przy rho = 0,58 (walidacja ISMN Condom): z = -1 -> p ≈ 0,30; p = 0,5 dopiero przy z ≈ -1,7.
+    """
+    from scipy import stats
+    z = np.asarray(z, float)
+    return stats.norm.cdf((c - rho * z) / np.sqrt(1 - rho ** 2))
 
 
 # ==============================================================================
@@ -301,8 +355,11 @@ def build_status(era5_an: Dict[str, pd.DataFrame], veg: pd.DataFrame, site_id: s
             reasons.append(f"VEG_Z={veg_z:.1f}({veg_src},{int(veg_age)}d)")
         in_season = m0 <= dk_end.month <= m1
         conf = "high" if np.isfinite(veg_z) and veg_age <= 10 else "medium" if (np.isfinite(veg_z) or not in_season) else "low"
+        p_soil = float(soil_drought_probability(r["sma_rz"], cfg.get("PSMA_RHO", 0.58), cfg["THR_SMA"])) \
+            if np.isfinite(r["sma_rz"]) else np.nan
         rows.append({"site_id": site_id, "date": dk_end.strftime("%Y-%m-%d"), "cdi_level": level, "cdi_class": cls,
                      "action": ACTION[cls], "spi1": r["spi1"], "spi3": r["spi3"], "sma_rz": r["sma_rz"],
+                     "p_soil_drought": p_soil,
                      "veg_z": veg_z, "veg_source": veg_src, "veg_age_days": veg_age, "confidence": conf,
                      "reason_codes": ";".join(reasons)})
         prev = level
