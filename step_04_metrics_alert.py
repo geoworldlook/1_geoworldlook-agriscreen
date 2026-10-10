@@ -417,14 +417,30 @@ def plot_season(status: pd.DataFrame, veg: pd.DataFrame, site_id: str, start: st
     return out_png
 
 
-def _veg_method(cfg: Dict[str, Any]) -> str:
-    """Opis warstwy roślinności (biuletyn, JSON): produkt detekcji i pokrycie SR."""
-    if cfg.get("VEG_PRODUCT") == "S2SR_2.5m":
-        txt = ("Sentinel-2 NDVI of the vineyard super-resolved to 2.5 m with SEN2SR (inner pixels), anomaly vs other "
-               "years; only scenes that pass the SR quality checks (H-SR0 detail, H-SR1 radiometric consistency of "
-               "the 10 m bands) enter detection; 10 m NDVI is kept as a reference")
+def _veg_baseline(cfg: Dict[str, Any]) -> str:
+    """Odniesienie anomalii roślinności (EN) zgodne z scene_anomaly: lata wcześniejsze / pozostałe, tor orbity, z."""
+    if cfg.get("VEG_CAUSAL", True):
+        n = cfg.get("VEG_REF_YEARS")
+        txt = f"the previous {int(n)} years only" if n else "previous years only"
     else:
-        txt = "Sentinel-2 NDVI of the vineyard at 10 m (inner pixels), anomaly vs other years"
+        txt = "all other years"
+    txt += f" (±{cfg.get('VEG_HALF_WINDOW_DAYS', 15)} days of year"
+    if cfg.get("VEG_BY_TRACK", True):
+        txt += ", same Sentinel-2 orbit track when enough scenes"
+    txt += ")"
+    if cfg.get("VEG_PREDICTIVE_Z", True):
+        txt += ", predictive z-score (Student t)"
+    return txt
+
+
+def _veg_method(cfg: Dict[str, Any]) -> str:
+    """Opis warstwy roślinności (biuletyn, JSON): produkt detekcji, odniesienie anomalii i pokrycie SR."""
+    if cfg.get("VEG_PRODUCT") == "S2SR_2.5m":
+        txt = (f"Sentinel-2 NDVI of the vineyard super-resolved to 2.5 m with SEN2SR (inner pixels), anomaly vs "
+               f"{_veg_baseline(cfg)}; only scenes that pass the SR quality checks (H-SR0 detail, H-SR1 radiometric "
+               f"consistency of the 10 m bands) enter detection; 10 m NDVI is kept as a reference")
+    else:
+        txt = f"Sentinel-2 NDVI of the vineyard at 10 m (inner pixels), anomaly vs {_veg_baseline(cfg)}"
     cov = cfg.get("SR_COVERAGE")
     if cov and cov.get("scenes"):
         txt += (f". SR coverage: {cov['sr_ok']} of {cov['scenes']} season scenes accepted, "
@@ -473,6 +489,9 @@ def build_bulletin(status: pd.DataFrame, veg: pd.DataFrame, validation: pd.DataF
             "logic": "Simplified EDO Combined Drought Indicator: watch = SPI-1<=-2 or SPI-3<=-1; "
                      "warning = root-zone soil moisture anomaly <=-1; alert = warning and vineyard NDVI anomaly <=-1",
             "soil_moisture": "ERA5-Land layers 0-100 cm, anomaly vs 1991-2020 day-of-year climatology",
+            "soil_drought_probability": f"P(in situ 20-30 cm anomaly <= {cfg['THR_SMA']:g} | ERA5-Land anomaly), "
+                                        f"bivariate normal with rho = {cfg.get('PSMA_RHO', 0.58):g} "
+                                        f"(ERA5-Land vs ISMN Condom)",
             "vegetation": _veg_method(cfg),
             "validation": "Anomaly correlation and drought-event detection against ISMN SMOSMANIA Condom (5-30 cm)",
         },
@@ -507,7 +526,9 @@ Generated {payload['generated_utc']} · status for the dekad ending **{cur['date
 ## How the status is built
 
 {payload['method']['logic']}. Soil moisture: {payload['method']['soil_moisture']}. Vegetation: {payload['method']['vegetation']}.
-The status means *check this vineyard*, not a diagnosis of vine water stress.
+Soil drought probability: {payload['method']['soil_drought_probability']}.
+The status means *check this vineyard*, not a diagnosis of vine water stress; the alert (soil + vegetation) is not
+yet validated against vine water status.
 
 ## Validated error of the anomalies (ISMN SMOSMANIA Condom, 136 m from the vineyard)
 

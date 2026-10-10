@@ -22,8 +22,9 @@ Samodzielny potok dla jednej stacji ISMN (domyślnie SMOSMANIA / Condom):
 
 Moduł nie zależy od kroków 2-5. Z kroku 1 używa tylko inicjalizacji GEE i maski chmur S2.
 
-Punkty rozbudowy (kolejne wersje): OPTRAM z SEN2SR 2.5 m, LST (pyDMS), kolejne stacje,
-wilgotność strefy korzeniowej (filtr wykładniczy), model ML.
+Monitoring winnicy używa z tego modułu walidacji anomalii (validate_anomalies, sekcja IX-b). Potok S-1
+(sekcje I–IX) jest eksperymentem: S-1 nie wchodzi do statusu (Plan v7, ustalenie 13). Kolejne kroki walidacji
+(QC A4, protokół A5, stacje SMOSMANIA) — docs/plans/Plan_v7_precyzja.md; dane satelitarne tylko Copernicus (D-048).
 
 Uruchomienie:
     from step_07_station_pipeline import run_station_pipeline

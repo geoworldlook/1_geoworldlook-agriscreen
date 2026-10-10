@@ -54,6 +54,13 @@ NDVI R 0,434 (v1.0, retrospektywnie) → 0,344 [0,14; 0,53] operacyjnie; prawdop
 i 0,128 klimatologii, niezawodność dobra (p ≈ 0,55 → zaobserwowane 0,54). Alarmy: 2022 — 10 dekad, 2023 — 1, 2026 — 12;
 2017 i 2019 bez alarmu (za krótka historia przed danym rokiem), zostają jako ostrzeżenia. Do zrobienia: A4, A5.
 
+**Aktualizacja 2026-10-10:** przebieg potoku w Colab 2026-10-09 (commit `f668b6c`, ta sama metoda — kod klimatologii
+bez zmian od `9f9c477`) daje dla NDVI winnicy R = **0,383 [0,16; 0,58], n = 200** (2018–2024); tę liczbę pokazuje
+dashboard i audyt w `docs/MIGRACJA_PODSUMOWANIE.md`. Wartość 0,344 powyżej pochodzi ze sprawdzenia offline przy
+wdrożeniu A1–A3; przyczyny różnicy nie ustalono (nie zachowano skryptu). Brier 0,101 / 0,172 też pochodzi z tego
+sprawdzenia offline — potok go jeszcze nie liczy (A5). Liczba alarmów zgadza się z przebiegiem (2022 — 10 dekad,
+2023 — 1, 2026 — 12).
+
 | Krok | Co | Kryterium akceptacji |
 |---|---|---|
 | A1 | Klimatologia przyczynowa roślinności (tylko lata wcześniejsze, min. 3 lata) w `step_04`; raportowanie skuteczności operacyjnej obok retrospektywnej. Trend obsłużony anomalią względem **innych winnic AOI z tej samej sceny** (różnica krzyżowa: „ta winnica vs sąsiedzi”) — wymaga statystyk dla wszystkich 15 winnic w `task_scene_stats` (klipy już powstają) | dashboard pokazuje liczby operacyjne; warstwa krzyżowa liczona dla 15 winnic |

@@ -9,9 +9,13 @@ Architektura: kod na GitHub -> obliczenia w Colab -> Dysk Google jako baza danyc
         task_ingest_s2       rastry Sentinel-2 (step_01, przyrostowo, manifest)
         task_ingest_era5     ERA5-Land 1991 -> dziś w punkcie winnicy (step_01, cache)
         task_scene_stats     indeksy obiektów: 10 m oraz SEN2SR 2,5 m z kontrolą H-SR0/H-SR1 (step_03, step_04)
-        task_anomalies       anomalie ERA5 (SMA, SPI) i roślinności + status dekadowy (step_04)
+        task_anomalies       anomalie ERA5 (SMA, SPI) i roślinności (klimatologia przyczynowa) + status dekadowy
+                             z prawdopodobieństwem suszy gleby (step_04)
         task_validate        błąd anomalii na profilu ISMN Condom (step_07)
-        task_bulletin        raport, wykresy i JSON dla geoworldlook.vercel.app (step_04)
+        task_weather         przymrozki i upały + walidacja ERA5-Land na stacjach Météo-France (step_08)
+        task_bulletin        raport, wykresy i JSON dla geoworldlook.vercel.app (step_04) + panele v1.2 (step_09)
+        task_dashboard       dashboard winnicy (step_06, panele step_09)
+        task_summary         run_summary.md — raport z uruchomienia do analizy po fakcie
 
 Architektura i uzasadnienie: docs/ARCHITEKTURA.md (literatura: docs/plans/Plan_v3_monitoring_winnic_SR.md, część A).
 Poprzednia wersja (potok AgriScreen v2.5): legacy/step_05_colab_run_v1.py.

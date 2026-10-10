@@ -44,7 +44,7 @@ STATUS_PL = {
     "recovery": ("Powrót do normy", "Po okresie suszy; anomalie jeszcze ujemne.", "#4f8fd6"),
     "watch": ("Obserwuj", "Mniej opadu niż zwykle; gleba jeszcze w normie.", "#e0b400"),
     "warning": ("Sucho", "Gleba wyraźnie suchsza niż zwykle o tej porze roku.", "#f08a24"),
-    "alert": ("Sprawdź winnicę", "Gleba sucha i roślinność tej winnicy słabsza niż w innych latach.", "#d63a2f"),
+    "alert": ("Sprawdź winnicę", "Gleba sucha i roślinność tej winnicy słabsza niż w poprzednich latach.", "#d63a2f"),
 }
 GAUGE_LEVEL = {"normal": 0.1, "recovery": 0.3, "watch": 0.45, "warning": 0.7, "alert": 0.92}
 SITE_CLIP_DIR = "site_ndvi"          # podkatalog SR_DIR z wycinkami NDVI działki
@@ -561,7 +561,7 @@ def _render(p: Dict[str, Any], era: pd.DataFrame, fc: Optional[pd.DataFrame], ch
         r = py.sort_values("year").iloc[-1]
         hz_html += (f'<div class="drv"><span>Przymrozki wiosenne {int(r["year"])}</span><b>{int(r["frost_days"])} dni</b>'
                     f'<small>{"ostatni " + pd.Timestamp(r["last_frost"]).strftime("%d.%m") if isinstance(r["last_frost"], str) and r["last_frost"] else ""}</small></div>'
-                    f'<div class="drv"><span>Upały ≥ {_fmt(cfg["HEAT_TMAX"], 0)} °C {int(r["year"])}</span>'
+                    f'<div class="drv"><span>Upały ≥ {_fmt(thr["heat"], 1)} °C {int(r["year"])}</span>'
                     f'<b>{int(r["heat_days"])} dni</b><small>Tmax sezonu {_fmt(r["max_tmax"], 1)} °C</small></div>')
     if fc is not None and len(fc):
         fr = fc[fc["tmin"] <= cfg["FROST_TMIN"]]

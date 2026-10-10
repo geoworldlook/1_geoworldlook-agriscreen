@@ -54,7 +54,7 @@ p = Φ((−1 − ρz)/√(1−ρ²)), ρ = 0,58.
 Wyniki: `MyDrive/GeoWorldLook/agriwatch/data/05_Final_Outputs/agriwatch/` (`dashboard.html`, `run_summary.md`, `bulletin.md`,
 CSV), rejestr: `data/registry/gwl_*.csv`. **Po każdym przebiegu czytać `run_summary.md`.**
 
-**Testy offline:** `python3 step_05_colab_run.py --selftest --out <katalog>` (~3–4 min) i `python3 step_08_weather.py`;
+**Testy offline:** `python3 step_05_colab_run.py --selftest --out <katalog>` (~4–6 min) i `python3 step_08_weather.py`;
 `python3 -m pyflakes step_0*.py step_09_panels.py` (znane: 2× `undefined name 'pd'` w step_01 — adnotacje).
 
 ---
@@ -84,7 +84,7 @@ CSV), rejestr: `data/registry/gwl_*.csv`. **Po każdym przebiegu czytać `run_su
 | v1.0 — status CDI, walidacja ISMN, dashboard | gotowe |
 | v1.1 (etap A planu v7) — klimatologia przyczynowa, tor orbity, z predykcyjne, prawdopodobieństwo suszy gleby | gotowe (A4 QC czujników i A5 protokół walidacji w kodzie — **otwarte**) |
 | Pogoda — przymrozki, upały, walidacja Météo-France | gotowe (progi ze stacji referencyjnej, D-049) |
-| v1.2 — panel kondycji, krzywa sezonu, matryca sygnałów, NDRE | gotowe, przeliczone w Colab 2026-10-09 bez błędów |
+| v1.2 — panel kondycji, krzywa sezonu, matryca sygnałów, NDRE | gotowe; selftest przechodzi. Ostatni przebieg Colab zapisany w repo (wyniki w notatniku) jest z commita `f668b6c` (2026-10-09 08:41 UTC, **przed** commitem v1.2 `a330ad1`) — przebieg po v1.2 potwierdzić nowym `run_summary.md` |
 | Okres ISMN automatyczny (`END_DATE="auto"`) | gotowe; **czeka na nowe pliki ISMN 2025–2026** od użytkownika |
 | ET0 z ERA5-Land + walidacja na ETP Météo-France | zaprojektowane (`docs/evidence/F7_v12/evap_v2.py`), niewdrożone |
 | Mapa anomalii w działce | zaprojektowana; wymaga wycinków 10 m z nazwami z godziną |
@@ -96,7 +96,8 @@ CSV), rejestr: `data/registry/gwl_*.csv`. **Po każdym przebiegu czytać `run_su
 ## 5. Audyt wyników
 
 Wszystkie liczby z przebiegów w Colab (rejestr na Dysku) lub z eksperymentów offline powtórzonych niezależnie
-(`docs/evidence/F4_eksperymenty`, `F7_v12`). Ocena: **mocne** = solidna metoda i próba; **ograniczone** = poprawne, ale
+(`docs/evidence/F4_eksperymenty`, `F7_v12`). Liczby z potoku sprawdzone 2026-10-10 z `run_summary.md` przebiegu
+2026-10-09 08:41 UTC (zapisanego w wynikach notatnika, commit `f668b6c`): zgadzają się co do drugiego miejsca po przecinku. Ocena: **mocne** = solidna metoda i próba; **ograniczone** = poprawne, ale
 z istotnym zastrzeżeniem; **słabe/niepotwierdzone** = nie wolno sprzedawać jako zwalidowane.
 
 ### 5.1 Tabela wyników
@@ -105,7 +106,7 @@ z istotnym zastrzeżeniem; **słabe/niepotwierdzone** = nie wolno sprzedawać ja
 |---|---|---|---|
 | Gleba 0–100 cm (ERA5-Land) | R = 0,58 [0,50; 0,67], n = 2976 dni (2016–2024) | ISMN 20–30 cm | **mocne** — typowy poziom dla ERA5 vs punkt |
 | Suche dekady (gleba z ≤ −1) | wykryte 57%, fałszywe 57% | ISMN 20–30 cm | **ograniczone** — to sufit dla R = 0,58 przy regule tak/nie |
-| Prawdopodobieństwo suszy gleby | Brier 0,10 vs 0,17 (reguła) i 0,13 (klimatologia); niezawodne | ISMN | **mocne**, ale policzone offline — nie ma go jeszcze w tabeli walidacji potoku (A5) |
+| Prawdopodobieństwo suszy gleby | Brier 0,10 vs 0,17 (reguła) i 0,13 (klimatologia); niezawodne | ISMN | **mocne**, ale policzone offline przy wdrożeniu (commit `9f9c477`, skryptu nie zachowano) — nie ma go jeszcze w tabeli walidacji potoku (A5) |
 | Gleba 0–7 cm | R = 0,47 [0,37; 0,57] (czujnik od 2019); 0,57 (2016–2019) | ISMN 5 cm | **ograniczone** — wymiana czujnika w 2019 |
 | NDVI winnicy (SR 2,5 m) | R = 0,38 [0,16; 0,58], n = 200 dni | ISMN 20–30 cm (pośrednio) | **ograniczone** — pośrednie, z opóźnieniem roślinności |
 | NDMI / NDRE | R = 0,40 / 0,29 | jw. | informacyjne; NDRE wyraźnie słabszy |
@@ -113,7 +114,7 @@ z istotnym zastrzeżeniem; **słabe/niepotwierdzone** = nie wolno sprzedawać ja
 | Tmin / Tmax dzienne | średni błąd 1,04 / 1,09 °C, przesunięcie −0,10 / +0,12 °C | MF Condom | **mocne** |
 | Upały (Tmax ≥ 35,5 °C) | wykryte 68%, fałszywe 9%, n = 73 dni (lata testowe 2021+) | MF Condom | **mocne**; próg 35 °C dawał 78%/11% (kalibracja nie przeniosła się — opisane uczciwie) |
 | Przymrozki wiosenne | 4 dni ze zdarzeniem w latach testowych | MF Condom | **niepotwierdzone** — za mało zdarzeń |
-| Alarm „sprawdź winnicę” (gleba + NDVI) | 9 dekad, 0 trafień wobec suchych dekad ISMN (2018–2024) | ISMN | **niepotwierdzone** — roślinność reaguje 1–1,5 mies. później |
+| Alarm „sprawdź winnicę” (gleba + NDVI) | F7 (migawka rejestru `277d162`): 9 dekad, 0 trafień wobec suchych dekad ISMN (2018–2024). Przebieg 2026-10-09: 11 dekad alarmu w 2018–2024 (2022: 10, 2023: 1); trafień potok nie liczy (A5) | ISMN | **niepotwierdzone** — roślinność reaguje 1–1,5 mies. później |
 | SEN2SR 2,5 m | wynik jak 10 m | — | tylko kosmetyka map |
 
 ### 5.2 Co wykazały testy negatywne (ważne dla CV — „umiem walidować”)
