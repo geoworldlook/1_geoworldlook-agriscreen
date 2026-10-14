@@ -858,8 +858,13 @@ def task_bulletin(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
         with open(paths["json"], "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=1, ensure_ascii=False)
         wl = s9.water_card_lines(wc, "en")
+        wq = os.path.join(out, "validation_weather.csv")
+        tq = os.path.join(out, "hazard_thresholds.json")
+        trust_en = s9.water_trust(val, pd.read_csv(wq) if os.path.exists(wq) else None,
+                                  json.load(open(tq)) if os.path.exists(tq) else None, cfg, "en")
         extra.append(f"## Water in the soil (area around the vineyard)\n\n**{wl['headline']}**\n\n"
-                     + "\n".join(f"- {x}" for x in wl["lines"]) + f"\n\n_{wl['footer']}_\n")
+                     + "\n".join(f"- {x}" for x in wl["lines"]) + "\n\n**How far to trust it**\n\n"
+                     + "\n".join(f"- {x}" for x in trust_en) + f"\n\n_{wl['footer']}_\n")
     except Exception as e:
         warn += f"; karta „Woda w winnicy” niedostępna: {type(e).__name__}: {e}"
         logger.warning(f"Biuletyn: karta „Woda w winnicy” niedostępna: {e}")
@@ -991,7 +996,9 @@ def task_summary(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
         summary["water_card"] = s9.water_card_json(wc)
         with open(js, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=1, ensure_ascii=False, default=str)
-        water_md = f"**{wl['headline']}**\n" + "\n".join(f"- {x}" for x in wl["lines"])
+        trust_pl = s9.water_trust(val, wval, thr, cfg, "pl")
+        water_md = (f"**{wl['headline']}**\n" + "\n".join(f"- {x}" for x in wl["lines"])
+                    + "\n\nNa ile ufać:\n" + "\n".join(f"- {x}" for x in trust_pl))
     except Exception as e:
         water_md = f"(niedostępna: {type(e).__name__}: {e})"
     md_txt = f"""# AgriWatch — raport z uruchomienia {summary['generated_utc']}
@@ -1219,6 +1226,7 @@ def _selftest(out_dir: str) -> None:
     with open(os.path.join(cfg["OUTPUT_DIR"], "agriwatch_latest.json"), encoding="utf-8") as f:
         wjs = json.load(f)["water_card"]
     assert wjs["category"]["code"] and wjs["date"] == "2024-12-31" and "Water in the soil" in bmd, wjs
+    assert "Na ile ufać" in dash and "niezwalidowane" in dash and "How far to trust it" in bmd
     wv = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_weather.csv"))
     b = wv[(wv["product"] == "ERA5L_TMIN") & (wv["period"] == "all") & (wv["metric"] == "bias")]["value"].iat[0]
     assert abs(b - 1.0) < 0.1, b                    # ERA5 cieplejsze o 1 °C od stacji

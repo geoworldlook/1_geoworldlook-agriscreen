@@ -1135,6 +1135,65 @@ def water_card_lines(card: Dict[str, Any], lang: str = "pl") -> Dict[str, Any]:
     return {"headline": head, "lines": lines, "footer": footer}
 
 
+def water_trust(val: Optional[pd.DataFrame], wval: Optional[pd.DataFrame], thr: Optional[Dict[str, Any]],
+                cfg: Dict[str, Any], lang: str = "pl") -> List[str]:
+    """
+    „Na ile ufać” karcie wody (Plan v9 W1b, D-071) — liczby z wyników potoku, nie wpisane na sztywno:
+      opad    — ERA5-Land vs deszczomierz Météo-France stacji referencyjnej (validation_weather.csv, sumy 30 dni),
+      gleba   — anomalia ERA5-Land 0–100 cm vs ISMN 20–30 cm (validation_anomalies.csv: R z CI, potwierdzone suche
+                dekady = 1 − FAR); prawdopodobieństwo na karcie jest pewnością tej kategorii,
+      reszta  — niedobór w mm, miejsce wśród lat i „od kiedy”: niezwalidowane (gleba modelu ERA5-Land).
+    """
+    pl = lang == "pl"
+    num = (lambda x, nd=2: _num(x, nd)) if pl else (lambda x, nd=2: "—" if not np.isfinite(_float(x)) else f"{x:.{nd}f}")
+    out = []
+    w = wval if wval is not None and len(wval) else pd.DataFrame(columns=["reference", "product", "segment", "metric"])
+    ref = (thr or {}).get("reference") or (str(w["reference"].iat[0]) if len(w) else "")
+    q = w[(w["reference"].astype(str) == ref) & (w["product"] == "ERA5L_PRECIP") & (w["segment"] == "sum_30d")]
+    r = q[q["metric"] == "pearson_r"]
+    if len(r):
+        b = q[q["metric"] == "bias_pct"]
+        name = str(r["subset"].iat[0]).split(" (")[0] if "subset" in r else ref
+        bias = (f", ERA5 {'+' if _float(b['value'].iat[0]) >= 0 else ''}{num(b['value'].iat[0], 0)}%" if len(b) else "")
+        out.append(f"Opad: ERA5-Land wobec deszczomierza Météo-France {name} — sumy 30 dni R = {num(r['value'].iat[0])}"
+                   f"{bias}, n = {int(r['n'].iat[0])} dni." if pl else
+                   f"Rain: ERA5-Land vs Météo-France rain gauge {name} — 30-day sums R = {num(r['value'].iat[0])}"
+                   f"{bias}, n = {int(r['n'].iat[0])} days.")
+    else:
+        out.append("Opad: brak wyników walidacji (uruchom task_weather)." if pl else "Rain: no validation results yet.")
+    v = val if val is not None and len(val) else pd.DataFrame(columns=["product", "segment", "metric"])
+    s = v[(v["product"] == "ERA5L_SM_RZ") & (v["segment"] == "anomaly_clim") & (v["metric"] == "pearson_r")]
+    e = v[(v["segment"] == "events_dekad") & (v["metric"] == "far")]
+    if len(s):
+        x = s.iloc[0]
+        txt = (f"Kategoria gleby: anomalia ERA5-Land 0–100 cm wobec czujnika ISMN Condom 20–30 cm (136 m od winnicy) — "
+               f"R = {num(x['value'])} [{num(x['ci_low'])}; {num(x['ci_high'])}], n = {int(x['n'])} dni" if pl else
+               f"Soil category: ERA5-Land 0–100 cm anomaly vs ISMN Condom 20–30 cm sensor (136 m from the vineyard) — "
+               f"R = {num(x['value'])} [{num(x['ci_low'])}; {num(x['ci_high'])}], n = {int(x['n'])} days")
+        if len(e) and np.isfinite(_float(e["value"].iat[0])):
+            conf = 100 * (1 - _float(e["value"].iat[0]))
+            txt += (f"; gdy model pokazywał suchą dekadę, czujnik potwierdzał ją w {num(conf, 0)}% przypadków "
+                    f"(n = {int(e['n'].iat[0])} dekad)" if pl else
+                    f"; when the model showed a dry dekad, the sensor confirmed it in {num(conf, 0)}% of cases "
+                    f"(n = {int(e['n'].iat[0])} dekads)")
+        if cfg.get("WATER_P_UNDER_REVIEW", True):
+            txt += (" — w rewizji (kontrola czujników referencyjnych, A4)" if pl
+                    else " — under review (reference sensor quality control, A4)")
+        out.append(txt + ".")
+        out.append("Prawdopodobieństwo na karcie to pewność tej kategorii: łączy anomalię modelu z jej zgodnością "
+                   f"z czujnikiem (ρ = {num(cfg.get('PSMA_RHO', 0.58))})." if pl else
+                   "The probability on the card is the confidence in this category: it combines the model anomaly with "
+                   f"its agreement with the sensor (ρ = {num(cfg.get('PSMA_RHO', 0.58))}).")
+    else:
+        out.append("Kategoria gleby: brak wyników walidacji (uruchom task_validate)." if pl
+                   else "Soil category: no validation results yet.")
+    out.append("Niedobór w mm, miejsce wśród lat i „od kiedy”: niezwalidowane — to wielkości w glebie modelu "
+               "ERA5-Land (okolica ~9 km), traktować orientacyjnie." if pl else
+               "Deficit in mm, rank among years and drought start: not validated — quantities in the ERA5-Land model "
+               "soil (area ~9 km); indicative only.")
+    return out
+
+
 def _selftest_water(cfg: Dict[str, Any]) -> None:
     """
     Karta „Woda w winnicy” na syntetycznym ERA5 1991–2026 (cykl roczny, bez szumu w normie) z ostatnimi 100 dniami
@@ -1174,7 +1233,25 @@ def _selftest_water(cfg: Dict[str, Any]) -> None:
         ["D4", "D4", "D3", "D3", "D2", "D1", "D0", "N", "N", "W", "W"]
     import json
     json.dumps(water_card_json(card))
+    wv = pd.DataFrame([
+        {"reference": "MF_1", "product": "ERA5L_PRECIP", "segment": "sum_30d", "period": "all", "metric": "pearson_r",
+         "value": 0.902, "n": 3927, "subset": "CONDOM (0 km, 173 m)"},
+        {"reference": "MF_1", "product": "ERA5L_PRECIP", "segment": "sum_30d", "period": "all", "metric": "bias_pct",
+         "value": 3.9, "n": 3927, "subset": "CONDOM (0 km, 173 m)"}])
+    va = pd.DataFrame([
+        {"product": "ERA5L_SM_RZ", "segment": "anomaly_clim", "metric": "pearson_r", "value": 0.583, "ci_low": 0.5,
+         "ci_high": 0.665, "n": 2976},
+        {"product": "ERA5L_SM_RZ<=-1", "segment": "events_dekad", "metric": "far", "value": 0.571, "ci_low": np.nan,
+         "ci_high": np.nan, "n": 312}])
+    tr = " ".join(water_trust(va, wv, {"reference": "MF_1"}, cfg))
+    assert "R = 0,90" in tr and "ERA5 +4%" in tr and "R = 0,58 [0,50; 0,67]" in tr and "43%" in tr, tr
+    assert "w rewizji" in tr and "niezwalidowane" in tr and "pewność tej kategorii" in tr, tr
+    te = " ".join(water_trust(va, wv, {"reference": "MF_1"}, cfg, "en"))
+    assert "R = 0.90" in te and "confirmed it in 43%" in te and "not validated" in te, te
+    t0 = " ".join(water_trust(None, None, None, cfg))
+    assert "brak wyników walidacji" in t0 and "niezwalidowane" in t0, t0
     print(f"[OK] Karta „Woda w winnicy”: {txt['headline']}; {txt['lines'][0]}")
+    print(f"[OK] Na ile ufać (W1b): {tr[:160]}…")
 
 
 # ==============================================================================

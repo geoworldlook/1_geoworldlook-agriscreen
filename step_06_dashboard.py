@@ -318,7 +318,8 @@ def _condition_html(cond: List[Dict[str, Any]], cfg: Dict[str, Any], status_date
             f'<div class="src" style="margin-top:8px">{esc(s9.condition_footer(cond, cfg, status_date))}</div>')
 
 
-def _water_html(card: Dict[str, Any], txt: Dict[str, Any], cfg: Dict[str, Any]) -> str:
+def _water_html(card: Dict[str, Any], txt: Dict[str, Any], cfg: Dict[str, Any],
+                trust: Optional[List[str]] = None) -> str:
     """Karta „Woda w winnicy” (Plan v9 W1; dane: step_09.water_card, zdania: water_card_lines): nagłówek w kolorze
     kategorii, skala percentyla w kolorach US Drought Monitor ze znacznikiem, zdania karty i stopka o skali."""
     import step_09_panels as s9
@@ -344,7 +345,10 @@ def _water_html(card: Dict[str, Any], txt: Dict[str, Any], cfg: Dict[str, Any]) 
             f'<div class="wbar">{bar}{mark}</div>'
             f'<div class="wlab"><span>sucho</span><span>norma</span><span>mokro</span></div>'
             f'<ul style="font-size:14px;line-height:1.5">{lines}</ul>'
-            f'<div class="src">{esc(txt["footer"])}</div></div>')
+            + (f'<div style="font-size:12px;font-weight:600;color:#555;margin-top:6px">Na ile ufać</div>'
+               f'<ul style="font-size:12px;color:#444;margin-top:2px">'
+               f'{"".join(f"<li>{esc(x)}</li>" for x in trust)}</ul>' if trust else "")
+            + f'<div class="src">{esc(txt["footer"])}</div></div>')
 
 
 def _weather_info(out_dir: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -528,7 +532,10 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
     def water_html():
         import step_09_panels as s9
         card = s9.water_card(era5, status, cfg, sid)
-        return _water_html(card, s9.water_card_lines(card, "pl"), cfg)
+        wq = os.path.join(out_dir, "validation_weather.csv")
+        wval = pd.read_csv(wq) if os.path.exists(wq) else pd.DataFrame()
+        trust_w = s9.water_trust(val, wval, wx.get("thr"), cfg, "pl")
+        return _water_html(card, s9.water_card_lines(card, "pl"), cfg, trust_w)
 
     element("water", water_html)
     element("condition", condition_html)

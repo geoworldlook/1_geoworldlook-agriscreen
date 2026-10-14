@@ -50,6 +50,10 @@ Razem ok. 8–10 sesji. Kolejność jak w tabeli.
 `water_card` w `agriwatch_latest.json`, sekcja w `run_summary.md`; selftest przechodzi). Czeka na pierwszy przebieg w Colab
 na prawdziwych danych. W1 nie zmienia trafności — te same liczby inaczej podane (§3a).
 
+**Stan 2026-10-14:** W1b wdrożone (`step_09.water_trust`): sekcja „Na ile ufać” na karcie, w biuletynie (EN)
+i w `run_summary.md`; liczby walidacji odczytywane z `validation_weather.csv` i `validation_anomalies.csv`; niedobór,
+miejsce wśród lat i „od kiedy” opisane jako niezwalidowane (D-071). Mapa W3b: NDMI domyślnie (decyzja 2026-10-14).
+
 **Po prototypie (osobna decyzja):** W3 — publikacja karty na GeoWorldLook (Supabase, mapa); W7 — automatyczna
 cotygodniowa aktualizacja (GitHub Actions, ERA5-Land z Copernicus Climate Data Store). To część etapu E Planu v8.
 
