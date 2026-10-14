@@ -38,6 +38,14 @@ Winiarz z działkami w okolicy Condom raz w tygodniu dostaje odpowiedź na czter
 
 Razem ok. 8–10 sesji. Kolejność jak w tabeli.
 
+**Rozszerzenie 2026-10-14 (zatwierdzona kolejność):** W1 → **W1b** → **W3a** → **W3b** → W2 → W4 → W5 → W6.
+
+| Krok | Co | Jak | Jedno sprawdzenie (D-067) | Sesje |
+|---|---|---|---|---|
+| **W1b** | „Na ile ufać” na karcie wody | odczyt walidacji z `validation_weather.csv` i `validation_anomalies.csv` (liczby z potoku, nie wpisane na sztywno); niedobór w mm, miejsce wśród lat i „od kiedy” oznaczone „niezwalidowane, orientacyjnie” (D-071) | test: każda liczba karty ma opis walidacji albo napis „niezwalidowane” | 1 |
+| **W3a** | Satelitarna wilgotność gleby: CLMS Soil Water Index 1 km (radar) jako drugie, niezależne źródło (D-072) | pobieranie z Copernicus Data Space (kod w `legacy/step_01_ingest_v1.py`, `fetch_cdse_swi_multidepth`); wartość T dobrana z literatury przed walidacją; percentyl wobec własnej normy SWI (krótszej niż 1991–2020 — opisane); na karcie „satelita potwierdza / nie potwierdza” | po A4: walidacja wobec ISMN tym samym protokołem; w karcie wyników POD/FAR „ERA5 i SWI zgodnie” wobec samego ERA5 | 2 |
+| **W3b** | **Okolica w Sentinel-2 (10 m)**: mapa anomalii w działkach obszaru, tabela działek, zdanie na karcie (D-073; specyfikacja §5b) | rastry S-2 z Dysku (414 scen), 22 działki z `1_AOI_GBOV_CONDOM.geojson`; ta sama metoda anomalii co status (lata wcześniejsze, ten sam tor, z predykcyjne) | kalibracja z (częstość z ≤ −1 w latach bez suszy gleby) i reakcja: mediana anomalii winnic obszaru wobec anomalii gleby ERA5 z opóźnieniem 30–60 dni (okno ustalone przed liczeniem); to nie jest walidacja trafności w działce — brak prawdy terenowej, piszemy wprost | 3–4 |
+
 **Stan 2026-10-14:** W1 wdrożone w kodzie (`step_09.water_card`, karta na górze dashboardu, sekcja w biuletynie,
 `water_card` w `agriwatch_latest.json`, sekcja w `run_summary.md`; selftest przechodzi). Czeka na pierwszy przebieg w Colab
 na prawdziwych danych. W1 nie zmienia trafności — te same liczby inaczej podane (§3a).
@@ -95,6 +103,38 @@ Kod (do napisania po akceptacji; przy zmianach pokazujemy tylko zmienione fragme
   testy karty w selfteście (kategorie, znak niedoboru, ranking, początek ciągu, zgodność percentyla).
 - Biuletyn (EN) i `agriwatch_latest.json`: sekcja „Water in the soil” z tymi samymi wielkościami.
 
+## 5b. Specyfikacja W3b — „Okolica w Sentinel-2 (10 m)” (do akceptacji przed kodem)
+
+**Po co:** ERA5-Land (~9 km) i SWI (1 km) mówią o okolicy. Sentinel-2 pokazuje, **co dzieje się w poszczególnych działkach
+obszaru** (4 × 4,4 km): które winnice i sady wyglądają gorzej niż zwykle i gdzie w działce.
+
+**Co Sentinel-2 mierzy, a czego nie (napis na karcie):** reakcję roślinności — zieleń (NDVI) i wodę w liściach (NDMI)
+winorośli i międzyrzędzi razem. Nie mierzy wilgotności gleby. Reaguje z opóźnieniem ok. 1 miesiąca (F7) i na koszenie
+lub uprawę międzyrzędzi.
+
+**Obiekty:** 22 działki z `1_AOI_GBOV_CONDOM.geojson` — 15 winnic, 5 sadów jabłoni, 2 działki z odkrytą glebą
+(odniesienie). Poza działkami mapa szara: pola uprawne i las zmieniają się z powodów niezwiązanych z wodą (żniwa, orka).
+
+**Dane:** rastry `data/01_Raw_Sentinel2/S2_L2A_*.tif` z Dysku (414 scen 2016–2026, IV–X, 10 pasm + maska chmur).
+Bez SR: 10 m (SR jest dla sygnału równoważny, a na mapie mógłby dodawać szczegół, którego nie ma). NDMI liczony z pasm
+20 m (B8A, B11) na siatce 10 m — rzeczywisty szczegół ok. 20 m; piszemy to na mapie.
+
+| Element | Definicja |
+|---|---|
+| **Mapa anomalii** (ostatnia bezchmurna scena) | dla każdego piksela działek: z wskaźnika wobec tego samego piksela w scenach z 5 poprzednich lat, ±15 dni, ten sam tor orbity, z predykcyjne z rozkładu t (te same reguły co `scene_anomaly`, min. 5 scen odniesienia, tylko piksele bezchmurne); skala brąz (poniżej normy) – szary – morski (powyżej); obrysy działek; warstwy NDMI (domyślna) i NDVI |
+| **Tabela działek** | typ, ha, data ostatniej sceny, z działki wobec jej własnej historii (`scene_anomaly` na średniej działki), z **na tle sąsiednich winnic** (z działki minus mediana z pozostałych winnic tej samej sceny — usuwa wspólny wpływ pogody i orbity), klasa (`z_class`: ≤ −1,5 / ≤ −1 / w normie / ≥ 1), zmiana w 3 ostatnich scenach; wiersz VINEYARD_06 wyróżniony |
+| **Zdanie na karcie wody** | np. „W okolicy 9 z 15 winnic ma wodę w liściach wyraźnie poniżej normy (NDMI, scena 21.09); Twoja winnica: z = −1,5, 4. najniżej z 15” |
+
+**Kod (po akceptacji):**
+- `step_05`: `task_area_stats` — statystyki 10 m dla 22 działek z każdej sceny (raz dla archiwum, potem przyrostowo;
+  „zrobione” liczone per działka i scena); `task_area_map` — z pikseli dla ostatniej sceny, GeoTIFF + PNG do mapy.
+- `step_09`: `area_table`, `area_sentence`; `step_06`: sekcja „Okolica w Sentinel-2 (10 m)” zaraz pod kartą wody
+  (mapa Leaflet jak mapa NDVI, tabela, podpis).
+- Selftest: syntetyczne działki z różną anomalią (kolejność w tabeli, z na tle sąsiadów, maska poza działkami).
+
+**Czego nie robimy w W3b:** wilgotności gleby z Sentinel-2 (wynik F4: nie dodaje informacji ponad ERA5), rozplątania
+winorośl/międzyrzędzie (Plan v8, moduł 3), sygnału z odkrytej gleby w SWIR (możliwy później jako osobny krok).
+
 ## 6. Decyzje
 
 - **D-064:** moduł 1 = „Woda w winnicy” (W1, W2, W4, W5, W6); zmienia kolejność z Planu v8 (D-052).
@@ -104,6 +144,11 @@ Kod (do napisania po akceptacji; przy zmianach pokazujemy tylko zmienione fragme
 - **D-068:** prototyp w obecnym układzie Colab + Dysk + `dashboard.html`; publikacja (W3) i automatyzacja (W7) po prototypie.
 - **D-070:** karta wyników (§3a): „przed” i „po” na tej samej referencji i w tym samym okresie, z punktami odniesienia.
 - Specyfikacja W1 (§5) zaakceptowana 2026-10-14: próg „od kiedy” = percentyl ≤ 20, karta po polsku w prototypie.
+- **D-071:** W1b w wariancie (a): niedobór w mm, miejsce wśród lat i „od kiedy” zostają na karcie z napisem
+  „niezwalidowane, orientacyjnie”; liczby walidacji odczytywane z wyników potoku.
+- **D-072:** W3a — CLMS SWI 1 km (Copernicus) jako satelitarne, niezależne potwierdzenie stanu gleby w okolicy.
+- **D-073:** W3b — lokalna warstwa Sentinel-2 10 m: anomalie pikseli i działek obszaru wobec własnej historii
+  i na tle sąsiednich winnic; opisana jako reakcja roślinności, nie wilgotność gleby.
 - **D-069:** kategorie suszy w glebie wg percentyli US Drought Monitor (NDMC/NOAA; system opisany w Svoboda i in. 2002).
 
 ## 7. Źródła
