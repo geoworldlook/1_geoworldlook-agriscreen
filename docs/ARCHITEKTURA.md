@@ -142,6 +142,8 @@ python -m pyflakes step_0*.py step_09_panels.py          # znane: 2× undefined 
 |---|---|
 | `docs/MIGRACJA_PODSUMOWANIE.md` | stan projektu, audyt wyników, następne kroki (2026-10-10) |
 | `docs/plans/Plan_v7_precyzja.md` | `PROPOSED` (2026-10-08), etap A wdrożony poza A4/A5; decyzje D-040…D-051 |
+| `docs/plans/Plan_v8_cloud_native_dl.md` | `PROPOSED` (2026-10-14): moduły 1 (A4, A5, cloud-native), 2 (U-Net na ortofotomapie), 3 (rozplątanie sygnału, test); D-052…D-059 |
+| `docs/evidence/A4_QC_czujnikow_ISMN.md` | `PROPOSED` (2026-10-14): metoda QC czujników 20/30 cm przed wdrożeniem; D-060…D-063 |
 | `docs/evidence/F4_eksperymenty/`, `F5_asymilacja_danych.md`, `F7_v12/` | dowody do Planu v7 i v1.2 (eksperymenty offline z recenzjami) |
 | `docs/evidence/F6_alerty_strefowe.md` | przegląd i projekt alertów w obrębie działki (niewdrożone) |
 | `docs/plans/Plan_v3_monitoring_winnic_SR.md` | `APPROVED` (2026-10-06); część A = przegląd literatury, z którego korzysta kod (EDO CDI, walidacja anomalii, SR) |

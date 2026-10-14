@@ -1,0 +1,40 @@
+== Tekstura in situ i punkt więdnięcia (Saxton-Rawls 2006) ==
+ 5 cm: ił 41.0%, piasek 14.8%, OC 1.01% -> WP = 0.246 m3/m3, 0,5·WP = 0.123
+10 cm: ił 44.2%, piasek 13.4%, OC 1.50% -> WP = 0.264 m3/m3, 0,5·WP = 0.132
+20 cm: ił 45.6%, piasek 12.4%, OC 1.21% -> WP = 0.271 m3/m3, 0,5·WP = 0.136
+30 cm: ił 46.0%, piasek 13.3%, OC 1.13% -> WP = 0.273 m3/m3, 0,5·WP = 0.137
+
+== Rozkład wartości godzinowych (flaga G) ==
+ 5 cm: n = 74922, min 0.038, p01 0.046, p05 0.056, mediana 0.218, maks 0.456
+10 cm: n = 39546, min 0.120, p01 0.135, p05 0.152, mediana 0.331, maks 0.414
+20 cm: n = 75620, min 0.001, p01 0.022, p05 0.032, mediana 0.265, maks 0.462
+30 cm: n = 74868, min 0.011, p01 0.012, p05 0.014, mediana 0.298, maks 0.472
+
+== Dni (średnia dobowa) poniżej progów, per rok: 20 cm / 30 cm ==
+      min_20  <0.05_20  <0.1_20  <0.135_20  min_30  <0.05_30  <0.1_30  <0.135_30
+rok                                                                             
+2016   0.065         0       73         97   0.045         7       88         97
+2017   0.023       148      196        208   0.012       192      218        222
+2018   0.024        71      100        111   0.013        76      106        114
+2019   0.019        90      114        134   0.011        99      113        151
+2020   0.035         4       44         91   0.046        12       65         89
+2021   0.075         0       20         70   0.026        18      107        120
+2022   0.004         1      131        180   0.011       151      184        194
+2023   0.051         0      101        119   0.018        90      103        107
+2024   0.075         0       11         61   0.058         0       65         72
+2025   0.330         0        0          0   0.367         0        0          0
+
+Dni z obiema głębokościami 20 i 30 cm: 3158
+  próg 0.1: dni z 20 lub 30 cm poniżej progu: 1121 (35%)
+  próg 0.135: dni z 20 lub 30 cm poniżej progu: 1242 (39%)
+  próg 0.15: dni z 20 lub 30 cm poniżej progu: 1282 (41%)
+
+== Spójność profilu ==
+2016-2020 (10 cm działa): 1685 dni; minimum 10 cm 0.122, 20 cm 0.020, 30 cm 0.011; dni 20 cm < 10 cm - 0,10: 645, 30 cm < 10 cm - 0,10: 639
+dni 20 cm < 0,05: 314; mediany tego dnia: 30 cm 0.016, 10 cm 0.232, 5 cm 0.199; odsetek dni z 20 cm < 5 cm: 1.00
+
+== Nagłe zmiany (godzinowe) ==
+20 cm: wzrosty >= 0,03/h: 249 (bez wzrostu 5 cm w 48 h: 33); maks. wzrost 0.334/h; spadek > 0,05 w <= 6 h: 103 h w 41 dniach
+30 cm: wzrosty >= 0,03/h: 187 (bez wzrostu 5 cm w 48 h: 38); maks. wzrost 0.360/h; spadek > 0,05 w <= 6 h: 104 h w 27 dniach
+5 cm (porównanie): spadek > 0,05 w <= 6 h: 12 dni
+10 cm (porównanie): spadek > 0,05 w <= 6 h: 0 dni
