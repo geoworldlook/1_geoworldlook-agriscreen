@@ -20,6 +20,10 @@ kolejne działki, zmiany SR). Obszar poszerzamy dopiero po skończonym module.
 
 Po module 3: v7 B, C, D albo nowe obszary — każdy jako osobny moduł.
 
+**Aktualizacja 2026-10-14 (D-064):** moduł 1 przedefiniowany w `docs/plans/Plan_v9_woda_w_winnicy.md` jako „Woda w winnicy”
+(prototyp w Colab: karta informacji o wodzie, A4, perspektywa 7 i 30 dni, faza winorośli). Etap E przechodzi na czas po prototypie.
+Moduły 2 i 3 bez zmian.
+
 ## 1. Dlaczego
 
 ### 1.1. Ustalenia z v7 i F7, na których stoi ten plan
