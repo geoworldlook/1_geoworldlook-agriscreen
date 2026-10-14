@@ -396,6 +396,12 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "MATRIX_SHOW_PLACEHOLDERS": False,    # wiersze-zaślepki (parowanie, S-1, S-3) ukryte do czasu danych (v1.2 B)
     # Prawdopodobieństwo suszy gleby (A7): korelacja anomalii ERA5-Land 0-100 cm z ISMN Condom 20-30 cm
     "PSMA_RHO": 0.58,
+    # Karta „Woda w winnicy” (Plan v9 W1, step_09.water_card); kategorie: progi percentyli US Drought Monitor (D-069)
+    "WATER_SINCE_PCT": 20,                # „od kiedy”: ciąg dekad o średnim percentylu ≤ 20 (umiarkowana susza i gorzej)
+    "WATER_WET_PCT": 70,                  # percentyl ≥ 70: wilgotniej niż zwykle
+    "WATER_ROUND_MM": 5,                  # niedobór w mm zaokrąglany do 5 mm (bez udawanej dokładności ERA5)
+    "WATER_PRECIP_DAYS": (30, 90),        # opad z ostatnich 30 i 90 dni jako % normy
+    "WATER_P_UNDER_REVIEW": True,         # prawdopodobieństwo z ISMN w rewizji do czasu A4 (Plan v9 W2)
     # Progi statusu (EDO CDI)
     "THR_SPI1": -2.0, "THR_SPI3": -1.0, "THR_SMA": -1.0, "THR_VEG": -1.0,
     "STATUS_START": "2016-01-01",
@@ -845,6 +851,20 @@ def task_bulletin(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     extra, warn = [], ""
     try:
         import step_09_panels as s9
+        wc = s9.water_card(pd.read_csv(_era5_csv(cfg), parse_dates=["time"]), status, cfg, cfg["MAIN_SITE"])
+        with open(paths["json"], encoding="utf-8") as f:
+            payload = json.load(f)
+        payload["water_card"] = s9.water_card_json(wc)
+        with open(paths["json"], "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=1, ensure_ascii=False)
+        wl = s9.water_card_lines(wc, "en")
+        extra.append(f"## Water in the soil (area around the vineyard)\n\n**{wl['headline']}**\n\n"
+                     + "\n".join(f"- {x}" for x in wl["lines"]) + f"\n\n_{wl['footer']}_\n")
+    except Exception as e:
+        warn += f"; karta „Woda w winnicy” niedostępna: {type(e).__name__}: {e}"
+        logger.warning(f"Biuletyn: karta „Woda w winnicy” niedostępna: {e}")
+    try:
+        import step_09_panels as s9
         traj = s9.season_trajectory(veg, pd.read_csv(_era5_csv(cfg), parse_dates=["time"]), cfg, cfg["MAIN_SITE"])
         paths["png_trajectory"] = s9.plot_season_trajectory(traj, cfg, os.path.join(out, "season_trajectory.png"))
         extra.append(f"## Season {traj['year']} against previous years\n\n_{s9.season_summary(traj)}_ (PL)\n\n"
@@ -962,6 +982,18 @@ def task_summary(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
         rows += ["| " + " | ".join("" if pd.isna(v) else str(v) for v in r) + " |" for r in df.itertuples(index=False)]
         return "\n".join(rows)
     srt = pd.DataFrame([{"zmienna": k, **(v if isinstance(v, dict) else {"wartość": v})} for k, v in sr.items()])
+    water_md = "(brak)"
+    try:
+        import step_09_panels as s9
+        wc = s9.water_card(pd.read_csv(era5_path, parse_dates=["time"]),
+                           pd.read_csv(st_path) if os.path.exists(st_path) else None, cfg, cfg["MAIN_SITE"])
+        wl = s9.water_card_lines(wc, "pl")
+        summary["water_card"] = s9.water_card_json(wc)
+        with open(js, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=1, ensure_ascii=False, default=str)
+        water_md = f"**{wl['headline']}**\n" + "\n".join(f"- {x}" for x in wl["lines"])
+    except Exception as e:
+        water_md = f"(niedostępna: {type(e).__name__}: {e})"
     md_txt = f"""# AgriWatch — raport z uruchomienia {summary['generated_utc']}
 
 Commit `{summary['git_commit']}` · urządzenie: {gpu} · sen2sr {summary['versions']['sen2sr']} · torch {summary['versions']['torch']}
@@ -974,6 +1006,9 @@ Commit `{summary['git_commit']}` · urządzenie: {gpu} · sen2sr {summary['versi
 
 ## Super-resolution (kontrola {s3.SR_QC_VERSION})
 {table(srt)}
+
+## Woda w glebie (karta W1)
+{water_md}
 
 ## Status bieżący
 {json.dumps(current, ensure_ascii=False, default=str)}
@@ -1179,6 +1214,11 @@ def _selftest(out_dir: str) -> None:
     assert {"track", "ref_mode"} <= set(veg.columns) and (veg["index"] == "ndre").any(), veg.columns
     s9._selftest_panels(veg, pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "status_dekads.csv")), era5, cfg,
                         cfg["MAIN_SITE"])
+    s9._selftest_water(cfg)
+    assert "Woda w glebie — okolica winnicy" in dash and dash.index("Woda w glebie") < dash.index("Kondycja winnicy")
+    with open(os.path.join(cfg["OUTPUT_DIR"], "agriwatch_latest.json"), encoding="utf-8") as f:
+        wjs = json.load(f)["water_card"]
+    assert wjs["category"]["code"] and wjs["date"] == "2024-12-31" and "Water in the soil" in bmd, wjs
     wv = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_weather.csv"))
     b = wv[(wv["product"] == "ERA5L_TMIN") & (wv["period"] == "all") & (wv["metric"] == "bias")]["value"].iat[0]
     assert abs(b - 1.0) < 0.1, b                    # ERA5 cieplejsze o 1 °C od stacji
@@ -1208,8 +1248,8 @@ def _selftest(out_dir: str) -> None:
     for name in ("bulletin.md", "agriwatch_latest.json", "dashboard.html"):
         assert os.path.exists(os.path.join(deg["OUTPUT_DIR"], name)), name
     d2 = open(os.path.join(deg["OUTPUT_DIR"], "dashboard.html"), encoding="utf-8").read()
-    assert "niedostępna" in msg_b and d2.count("Element niedostępny") == 3 and "Ryzyko suszy" in d2, msg_b
-    print("[OK] Bez modułu step_09: biuletyn, agriwatch_latest.json i dashboard powstają (3 karty „Element niedostępny”).")
+    assert "niedostępna" in msg_b and d2.count("Element niedostępny") == 4 and "Ryzyko suszy" in d2, msg_b
+    print("[OK] Bez modułu step_09: biuletyn, agriwatch_latest.json i dashboard powstają (4 karty „Element niedostępny”).")
     print("[OK] Selftest monitoringu. Status:", js["current"]["date"], js["current"]["cdi_class"])
     print(val[["product", "reference", "segment", "subset", "metric", "value", "n"]].round(3).to_string(index=False))
 

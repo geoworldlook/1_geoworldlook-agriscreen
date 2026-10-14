@@ -31,7 +31,7 @@ z flagą `+dirty`, parametry, liczba nowych wierszy). Błąd zadania jest zapisy
 | `step_06_dashboard.py` | Dashboard winnicy (HTML, wzór: panel Wago z ESA WineEO) | `save_site_ndvi` (wycinki NDVI działki z `task_scene_stats`), `build_dashboard` (mapa NDVI na zdjęciu satelitarnym z wyborem daty, status, ryzyko suszy z prawdopodobieństwem, przyczyny, panele v1.2, pogoda ERA5 + prognoza Open-Meteo, przymrozki i upały, wiarygodność), `show_dashboard` |
 | `step_07_station_pipeline.py` | Stacja ISMN: QC i walidacja anomalii; eksperymentalny potok S-1 | `qc_insitu`, `validate_anomalies` (używana w monitoringu); `extract_satellite`, `s1_change_detection`, `evaluate`, `run_station_pipeline` (potok S-1, poza statusem) |
 | `step_08_weather.py` | Przymrozki, upały i walidacja ERA5-Land na stacjach Météo-France | `download_mf`, `read_mf`, `select_stations`, `validate_weather` (Tmin, Tmax, opad, SPI), `calibrated_thresholds`, `weather_hazards`, `hazard_summary` |
-| `step_09_panels.py` | Panele prezentacji v1.2 (dashboard i biuletyn) | `condition_panel` („Kondycja winnicy”: NDVI, NDRE, NDMI), `season_trajectory` + `plot_season_trajectory` (krzywa sezonu), `signal_matrix` + `matrix_html` / `plot_signal_matrix` (matryca sygnałów), `_selftest_panels` |
+| `step_09_panels.py` | Karta „Woda w winnicy” (Plan v9 W1) i panele prezentacji v1.2 (dashboard i biuletyn) | `water_card` + `water_card_lines` + `water_card_json` (karta wody), `condition_panel` („Kondycja winnicy”: NDVI, NDRE, NDMI), `season_trajectory` + `plot_season_trajectory` (krzywa sezonu), `signal_matrix` + `matrix_html` / `plot_signal_matrix` (matryca sygnałów), `_selftest_panels` |
 | `build_colab_master.py` | Generator `notebooks/AgriWatch_Monitor.ipynb` (notatnika nie edytujemy ręcznie) | `create_monitor_notebook` |
 
 Zależności między modułami: `step_05` importuje pozostałe moduły leniwie (wewnątrz zadań); `step_09` importuje `step_04`;
@@ -82,6 +82,11 @@ Zależności między modułami: `step_05` importuje pozostałe moduły leniwie (
   w punkcie winnicy. Progi kalibrowane tylko na stacji Météo-France w promieniu 5 km (Condom, 0,2 km), na latach
   < 2021, i tylko gdy jest ≥ 10 zdarzeń i CSI rośnie o ≥ 0,05; inaczej próg nominalny (0 °C, 35 °C). POD/FAR na
   latach ≥ 2021 dla progu używanego w produkcie (D-049).
+- **Karta „Woda w winnicy”** (`step_09.water_card`, Plan v9 W1): percentyl wilgotności 0–100 cm wobec normy
+  1991–2020 (±15 dni) → kategoria wg progów US Drought Monitor (≤ 2, 5, 10, 20, 30; ≥ 70 wilgotniej); niedobór =
+  (mediana normy − stan) × 1000 mm, zaokrąglony do 5 mm; miejsce wśród tego samego dnia we wszystkich latach ERA5;
+  „od kiedy” = ciąg dekad o średnim percentylu ≤ 20; opad 30/90 dni jako % mediany normy. Ta sama karta w dashboardzie
+  (PL), biuletynie (EN), `agriwatch_latest.json` (`water_card`) i `run_summary.md`. Dotyczy okolicy, nie działki.
 - **Panele v1.2** (`step_09`): kondycja winnicy (najnowsze z NDVI, NDRE, NDMI z klasą słowną i R wobec ISMN; NDRE
   i NDMI informacyjnie, D-051), krzywa sezonu (pasmo 10–90% NDVI z 5 lat ściśle wcześniejszych; gleba na tle normy
   1991–2020), matryca sygnałów (kaskada CDI, ostatnie 36 dekad, wybór sceny jak w statusie).

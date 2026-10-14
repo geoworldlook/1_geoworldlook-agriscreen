@@ -4,15 +4,13 @@ AgriWatch - KROK 6: DASHBOARD WINNICY (wzór: panel Wago, projekt ESA WineEO)
 ================================================================================
 Jeden samodzielny plik HTML dla jednej winnicy, wyświetlany w Colab i zapisywany obok biuletynu:
 
-  ┌ Działka ────────┬ Mapa NDVI 2,5 m na zdjęciu satelitarnym ┬ Stan (komunikat), Ryzyko suszy (wskaźnik),  ┐
-  │ nazwa, ha, dane │ wybór daty sceny, obrys działki          │ Przyczyny: SPI-1, SPI-3, gleba, roślinność   │
-  ├─ Kondycja winnicy: NDVI, NDRE, NDMI (z, klasa, 8 dni, R) ──┼ Wiarygodność: ISMN Condom + Météo-France      ┤
-  ├─ Sezon na tle lat poprzednich: NDVI (5 lat), gleba 0–100 cm (norma 1991–2020) + zdanie podsumowania ─────┤
-  ├─ Matryca sygnałów: opad -> gleba -> roślinność, 36 dekad, pasek statusu ───────────────────────────────────┤
-  ├ Pogoda: 10 dni ─┼ Prognoza 7 dni (Open-Meteo) ──────────────┼ Przymrozki i upały (progi ze stacji MF)      ┤
-  ├─ Tabela: ostatnie 5 lat (status, przymrozki, upały) ───────────────────────────────────────────────────────┤
-  └─ Wykres: ostatnie 5 lat (DASHBOARD_YEARS) ──────────────────────────────────────────────────────────────────┘
-Panele v1.2 (Kondycja, Sezon, Matryca) liczy step_09; błąd jednego z nich daje kartę „Element niedostępny”.
+  1. Woda w glebie — okolica winnicy (Plan v9 W1): kategoria suszy z percentyla (US Drought Monitor), niedobór w mm,
+     miejsce wśród lat, od kiedy, opad 30/90 dni jako % normy, prawdopodobieństwo z ISMN, skala i opóźnienie danych.
+  2. Sezon na tle lat poprzednich (NDVI 5 lat, gleba na tle normy 1991–2020).
+  3. Pogoda: ostatnie dni ERA5-Land · prognoza 7 dni (Open-Meteo) · przymrozki i upały (progi ze stacji MF).
+  4. Roślinność działki (informacyjnie): dane działki, mapa NDVI 2,5 m z wyborem daty, kondycja NDVI/NDRE/NDMI.
+  5. Szczegóły: status EDO (CDI) z przyczynami w z-score, ryzyko suszy, wiarygodność, matryca sygnałów, ostatnie lata.
+Karta wody i panele v1.2 (Kondycja, Sezon, Matryca) liczy step_09; błąd jednego z nich daje kartę „Element niedostępny”.
 
 Różnica wobec Wago: zamiast zalecenia nawadniania („podlej 35 mm”) mówimy o anomalii wilgotności
 („sprawdź winnicę”). Dane wyłącznie z wyników zadań step_05 (status_dekads.csv, veg_anomalies.csv,
@@ -320,6 +318,35 @@ def _condition_html(cond: List[Dict[str, Any]], cfg: Dict[str, Any], status_date
             f'<div class="src" style="margin-top:8px">{esc(s9.condition_footer(cond, cfg, status_date))}</div>')
 
 
+def _water_html(card: Dict[str, Any], txt: Dict[str, Any], cfg: Dict[str, Any]) -> str:
+    """Karta „Woda w winnicy” (Plan v9 W1; dane: step_09.water_card, zdania: water_card_lines): nagłówek w kolorze
+    kategorii, skala percentyla w kolorach US Drought Monitor ze znacznikiem, zdania karty i stopka o skali."""
+    import step_09_panels as s9
+    esc = html.escape
+    cat = card["category"]
+    pct = s9._float(card["percentile"])
+    fg = "#fff" if cat["code"] in ("D3", "D4") else "#222"
+    segs, lo = [], 0.0
+    for upper, _, _, color in cfg.get("WATER_CATEGORIES", s9.WATER_CATEGORIES):
+        segs.append((lo, float(upper), color))
+        lo = float(upper)
+    wet = float(cfg.get("WATER_WET_PCT", 70))
+    segs += [(lo, wet, s9.WATER_NORMAL[2]), (wet, 100.0, s9.WATER_WET[2])]
+    bar = "".join(f'<span style="width:{hi - lo:.1f}%;background:{c}"></span>' for lo, hi, c in segs)
+    mark = (f'<div class="wmark" style="left:{min(max(pct, 0.0), 100.0):.1f}%" title="percentyl {s9._num(pct, 0)}">'
+            f'</div>' if np.isfinite(pct) else "")
+    chip = (f'<span class="wchip" style="background:{cat["color"]};color:{fg}">'
+            f'{esc((cat["code"] + " · ") if cat["code"] else "")}{esc(cat["label"])}</span>')
+    lines = "".join(f"<li>{esc(x)}</li>" for x in txt["lines"])
+    return (f'<div style="border-left:6px solid {cat["color"]};padding-left:12px">'
+            f'<h3>Woda w glebie — okolica winnicy {chip}</h3>'
+            f'<div style="font-size:20px;font-weight:700;margin:4px 0 8px">{esc(txt["headline"])}</div>'
+            f'<div class="wbar">{bar}{mark}</div>'
+            f'<div class="wlab"><span>sucho</span><span>norma</span><span>mokro</span></div>'
+            f'<ul style="font-size:14px;line-height:1.5">{lines}</ul>'
+            f'<div class="src">{esc(txt["footer"])}</div></div>')
+
+
 def _weather_info(out_dir: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Wyniki task_weather: progi, zdarzenia w winnicy per rok, linie wiarygodności (stacja referencyjna MF)."""
     def rd(name):
@@ -498,6 +525,12 @@ def build_dashboard(rt: Dict[str, Any], cfg: Dict[str, Any], forecast: bool = Tr
         import step_09_panels as s9
         return s9.matrix_html(s9.signal_matrix(status, veg, cfg, sid), cfg, {k: v[0] for k, v in STATUS_PL.items()})
 
+    def water_html():
+        import step_09_panels as s9
+        card = s9.water_card(era5, status, cfg, sid)
+        return _water_html(card, s9.water_card_lines(card, "pl"), cfg)
+
+    element("water", water_html)
     element("condition", condition_html)
     element("season", season_html)
     element("matrix", matrix_html)
@@ -634,9 +667,22 @@ ul{{padding-left:18px;font-size:12px;margin:4px 0}} .full{{grid-column:1/4}}
 .zbig{{font-size:32px;font-weight:700;line-height:1.1}}
 .badge{{font-size:10px;padding:1px 7px;border-radius:9px;background:#e4f0d8;color:#3d6b1f;white-space:nowrap}}
 .badge.info{{background:#f0f0f0;color:#666}}
+.sec h2{{margin:14px 0 0;font-size:18px;color:#333}}
+.wbar{{position:relative;display:flex;height:12px;border-radius:3px;overflow:visible;margin:4px 0}}
+.wbar span{{height:12px;display:block}}
+.wmark{{position:absolute;top:-5px;width:3px;height:22px;background:#111;transform:translateX(-1px)}}
+.wlab{{display:flex;justify-content:space-between;font-size:11px;color:#888}}
+.wchip{{font-size:11px;padding:2px 8px;border-radius:9px;margin-left:8px;text-transform:none;letter-spacing:0;vertical-align:middle}}
 </style></head><body>
 <div class="top">AgriWatch · monitoring anomalii wilgotności <small>{esc(p['generated'])}</small></div>
 <div class="grid">
+ <div class="card full">{panels.get("water", na)}</div>
+ <div class="card full"><h3>{esc(panels.get("traj_title", "Sezon na tle lat poprzednich"))}</h3>{panels.get("season", na)}</div>
+ <div class="card"><h3>Pogoda: ostatnie dni (ERA5-Land)</h3>
+  <table><tr><th>dzień</th><th>opad mm</th><th>Tmin °C</th><th>Tmax °C</th></tr>{era_rows}</table></div>
+ <div class="card"><h3>Prognoza 7 dni</h3>{fc_html}</div>
+ <div class="card"><h3>Przymrozki i upały</h3>{hz_html}</div>
+ <div class="sec full"><h2>Roślinność działki (informacyjnie)</h2><div class="src">Sentinel-2 dla tej działki. Roślinność nie wchodzi do oceny wody w glebie; alarm „Sprawdź winnicę” (gleba + roślinność) nie jest zwalidowany.</div></div>
  <div class="card"><h3>Działka</h3>
   <div style="font-size:16px;font-weight:600">{esc(p['site']['name'])}</div>
   <div class="drv"><span>Uprawa</span><b>winorośl</b></div>
@@ -647,29 +693,23 @@ ul{{padding-left:18px;font-size:12px;margin:4px 0}} .full{{grid-column:1/4}}
   <ul><li>Opad, gleba: ERA5-Land (~9 km)</li><li>Roślinność: Sentinel-2, {"SEN2SR 2,5 m" if cfg['VEG_PRODUCT'] == 'S2SR_2.5m' else "10 m"}</li>
   <li>{esc(cov_txt)}</li><li>{esc(norm_txt)}</li></ul>
  </div>
- <div class="card"><h3>Roślinność (NDVI) <select id="sel" style="float:right">{opts}</select></h3>
+ <div class="card" style="grid-column:2/4"><h3>Roślinność (NDVI) <select id="sel" style="float:right">{opts}</select></h3>
   <div id="map"></div>
   <div class="legend"><span>słaba</span><div class="bar"></div><span>silna</span></div>
   <div id="info" class="src"></div>
  </div>
- <div style="display:flex;flex-direction:column;gap:12px">
-  <div class="card status"><h3>Stan na {esc(str(s['date']))}</h3>
+ <div class="card full"><h3>Kondycja winnicy</h3>{panels.get("condition", na)}</div>
+ <div class="sec full"><h2>Szczegóły: logika EDO i walidacja</h2><div class="src">Status według uproszczonego wskaźnika suszy EDO (CDI), przyczyny jako z-score, matryca sygnałów, wyniki walidacji i historia.</div></div>
+ <div class="card status"><h3>Status EDO na {esc(str(s['date']))}</h3>
    <div class="lbl">{esc(s['label'])}</div><div style="font-size:13px;margin:6px 0">{esc(s['meaning'])}</div>
    <div class="src">od {esc(str(s['since']))} ({s['n_dekads']} dekad) · pewność: {esc(str(s['confidence']))}</div></div>
-  <div class="card"><h3>Ryzyko suszy</h3>{_gauge_svg(s['gauge'], s['color'])}{p_soil_html}</div>
-  <div class="card"><h3>Przyczyny (z-score, ≤ −1 = anomalia)</h3>
+ <div class="card"><h3>Ryzyko suszy</h3>{_gauge_svg(s['gauge'], s['color'])}{p_soil_html}</div>
+ <div class="card"><h3>Przyczyny (z-score, ≤ −1 = anomalia)</h3>
    {drv("Opad 30 dni (SPI-1)", d['spi1'], "próg −2")}{drv("Opad 90 dni (SPI-3)", d['spi3'], "próg −1")}
    {drv("Wilgotność gleby 0–100 cm", d['sma'], "próg −1")}{drv("Wierzchnia warstwa 0–7 cm", d.get('sma_l1'), "informacyjnie")}{drv("Roślinność winnicy (NDVI)", d['veg_z'], veg_note)}</div>
- </div>
- <div class="card" style="grid-column:1/3"><h3>Kondycja winnicy</h3>{panels.get("condition", na)}</div>
- <div class="card"><h3>Wiarygodność (ISMN Condom)</h3><ul>{trust_html}</ul>
+ <div class="card full"><h3>Wiarygodność (ISMN Condom)</h3><ul>{trust_html}</ul>
   <div class="src">Status oznacza „sprawdź winnicę”, nie diagnozę stresu wodnego winorośli. Umiarkowany niedobór wody bywa pożądany dla jakości.</div></div>
- <div class="card full"><h3>{esc(panels.get("traj_title", "Sezon na tle lat poprzednich"))}</h3>{panels.get("season", na)}</div>
  <div class="card full"><h3>Matryca sygnałów</h3>{panels.get("matrix", na)}</div>
- <div class="card"><h3>Pogoda: ostatnie dni (ERA5-Land)</h3>
-  <table><tr><th>dzień</th><th>opad mm</th><th>Tmin °C</th><th>Tmax °C</th></tr>{era_rows}</table></div>
- <div class="card"><h3>Prognoza 7 dni</h3>{fc_html}</div>
- <div class="card"><h3>Przymrozki i upały</h3>{hz_html}</div>
  <div class="card full"><h3>Ostatnie {int(cfg.get("DASHBOARD_YEARS", 5))} lat</h3>{yt_html or '<div class="src">Brak danych.</div>'}</div>
  <div class="card full"><h3>Ostatnie {int(cfg.get("DASHBOARD_YEARS", 5))} lat: opad, gleba, roślinność, status</h3>{f'<img src="data:image/png;base64,{chart}" style="width:100%">' if chart else '<div class="src">Wykres powstaje w task_bulletin.</div>'}</div>
 </div>

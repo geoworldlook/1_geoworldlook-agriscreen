@@ -38,8 +38,26 @@ Winiarz z działkami w okolicy Condom raz w tygodniu dostaje odpowiedź na czter
 
 Razem ok. 8–10 sesji. Kolejność jak w tabeli.
 
+**Stan 2026-10-14:** W1 wdrożone w kodzie (`step_09.water_card`, karta na górze dashboardu, sekcja w biuletynie,
+`water_card` w `agriwatch_latest.json`, sekcja w `run_summary.md`; selftest przechodzi). Czeka na pierwszy przebieg w Colab
+na prawdziwych danych. W1 nie zmienia trafności — te same liczby inaczej podane (§3a).
+
 **Po prototypie (osobna decyzja):** W3 — publikacja karty na GeoWorldLook (Supabase, mapa); W7 — automatyczna
 cotygodniowa aktualizacja (GitHub Actions, ERA5-Land z Copernicus Climate Data Store). To część etapu E Planu v8.
+
+## 3a. Karta wyników: co się poprawiło (D-070)
+
+Stała tabela metryk mierzonych na starcie (v1.2) i po każdym kroku. **„Przed” i „po” zawsze na tej samej referencji
+i w tym samym okresie** — porównanie starych liczb (referencja z artefaktami) z nowymi (po A4) byłoby nieuczciwe.
+Wynik „brak poprawy” też wpisujemy. Tabela żyje w `docs/evidence/karta_wynikow.md` od kroku W2.
+
+| Krok | Czy zmienia trafność | Co porównujemy |
+|---|---|---|
+| W1 karta | nie — te same liczby inaczej podane | nic; zapisujemy wprost, że to zmiana prezentacji |
+| W2 A4 | zmienia referencję, nie produkt | stara i nowa reguła statusu policzone na tej samej, poprawionej referencji: POD/FAR suchych dekad, Brier prawdopodobieństwa (W1/W2/W3 z notatki A4) |
+| W4 7 dni | nowy element | błąd zmiany niedoboru wobec punktu odniesienia „bez zmian przez 7 dni” |
+| W5 30 dni | nowy element | Brier wobec klimatologii i wobec „susza dziś = susza za 30 dni”; poprawa tylko, gdy lepszy od obu |
+| Moduł 3 (Plan v8) | rozplątanie | FAR i opóźnienie składowej winorośli wobec NDVI całego piksela (H-F6, zahashowana przed testem) |
 
 ## 4. Czego w tym module nie robimy
 
@@ -84,6 +102,8 @@ Kod (do napisania po akceptacji; przy zmianach pokazujemy tylko zmienione fragme
 - **D-066:** niedobór względem normy w glebie modelu ERA5-Land, z dopiskiem „okolica, model”; żadnych twierdzeń o stresie winorośli.
 - **D-067:** każdy nowy element ma jedno sprawdzenie na danych historycznych, zapisane przed policzeniem; potem trafia do produktu.
 - **D-068:** prototyp w obecnym układzie Colab + Dysk + `dashboard.html`; publikacja (W3) i automatyzacja (W7) po prototypie.
+- **D-070:** karta wyników (§3a): „przed” i „po” na tej samej referencji i w tym samym okresie, z punktami odniesienia.
+- Specyfikacja W1 (§5) zaakceptowana 2026-10-14: próg „od kiedy” = percentyl ≤ 20, karta po polsku w prototypie.
 - **D-069:** kategorie suszy w glebie wg percentyli US Drought Monitor (NDMC/NOAA; system opisany w Svoboda i in. 2002).
 
 ## 7. Źródła

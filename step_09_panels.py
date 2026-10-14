@@ -903,6 +903,281 @@ def matrix_html(mx: Dict[str, Any], cfg: Dict[str, Any], status_labels: Optional
 
 
 # ==============================================================================
+# III-b. KARTA „WODA W WINNICY” (Plan v9, krok W1)
+# ==============================================================================
+# Te same dane, które potok już ma (ERA5-Land w punkcie winnicy, status dekadowy), podane językiem winiarza:
+# kategoria suszy z percentyla wilgotności 0–100 cm (progi US Drought Monitor, D-069), niedobór w mm względem mediany
+# normy, miejsce wśród lat, od kiedy trwa susza, opad 30 i 90 dni jako % normy, prawdopodobieństwo z ISMN.
+# Karta dotyczy okolicy (oczko ERA5-Land ~9 km), nie pomiaru w działce, i nie mówi o stresie winorośli (D-066).
+# water_card zwraca dane (do JSON i przyszłej strony), water_card_lines — zdania PL/EN, HTML rysuje step_06.
+
+MONTHS_GEN_PL = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września",
+                 "października", "listopada", "grudnia"]
+MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+             "November", "December"]
+# Kategorie z percentyla (≤ górna granica): progi i kolory US Drought Monitor; powyżej WATER_WET_PCT — wilgotniej
+WATER_CATEGORIES = ((2, "D4", "wyjątkowa susza", "#730000"), (5, "D3", "skrajna susza", "#e60000"),
+                    (10, "D2", "silna susza", "#ffaa00"), (20, "D1", "umiarkowana susza", "#fcd37f"),
+                    (30, "D0", "nienormalnie sucho", "#ffff00"))
+WATER_NORMAL = ("N", "w normie", "#cfe3c8")
+WATER_WET = ("W", "wilgotniej niż zwykle", "#9cc3e6")
+WATER_LABEL_EN = {"D4": "exceptional drought", "D3": "extreme drought", "D2": "severe drought",
+                  "D1": "moderate drought", "D0": "abnormally dry", "N": "near normal", "W": "wetter than usual"}
+
+
+def plural_pl(n: int, one: str, few: str, many: str) -> str:
+    """Odmiana rzeczownika po liczebniku: 1 rok, 2–4 lata (bez 12–14), 5+ lat."""
+    n = abs(int(n))
+    if n == 1:
+        return one
+    return few if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else many
+
+
+def water_category(pct: Any, cfg: Dict[str, Any]) -> tuple:
+    """(kod, etykieta PL, kolor) z percentyla 0–100: ≤ 2 D4 … ≤ 30 D0, ≥ WATER_WET_PCT wilgotniej, pomiędzy norma."""
+    p = _float(pct)
+    if not np.isfinite(p):
+        return ("", "brak danych", "#d9d9d9")
+    for upper, code, label, color in cfg.get("WATER_CATEGORIES", WATER_CATEGORIES):
+        if p <= upper:
+            return (code, label, color)
+    return WATER_WET if p >= cfg.get("WATER_WET_PCT", 70) else WATER_NORMAL
+
+
+def _same_day(year: int, t: pd.Timestamp) -> pd.Timestamp:
+    """Ten sam dzień kalendarza w innym roku (29 II -> 28 II)."""
+    return pd.Timestamp(year=year, month=t.month, day=28 if (t.month == 2 and t.day == 29) else t.day)
+
+
+def water_card(era5: pd.DataFrame, status: Optional[pd.DataFrame], cfg: Dict[str, Any], site_id: str) -> Dict[str, Any]:
+    """
+    Dane karty „Woda w winnicy” na ostatni dzień ERA5-Land (słownik zwykłych typów Pythona i pd.Timestamp):
+      percentile    — percentyl wilgotności 0–100 cm wobec dni normy CLIM_REF z okna ±CLIM_HALF_WINDOW_DAYS
+                      (ta sama definicja co s4.clim_anomaly i status),
+      category      — kod, etykieta i kolor kategorii (water_category),
+      deficit_mm    — (mediana normy − stan) × 1000 mm warstwy 0–100 cm, zaokrąglona do WATER_ROUND_MM (> 0 = niedobór),
+      rank_dry      — miejsce stanu wśród tego samego dnia kalendarza we wszystkich latach ERA5 (1 = najsuchszy),
+      since         — pierwszy dzień obecnego ciągu dekad o średnim percentylu ≤ WATER_SINCE_PCT (None, gdy ciągu brak),
+      rain          — {dni: suma mm, mediana sum z tego samego okna w latach normy, % normy} dla WATER_PRECIP_DAYS,
+      p_soil        — prawdopodobieństwo suszy w gruncie z ostatniej dekady statusu (step_04.soil_drought_probability).
+    """
+    e = era5.set_index(pd.to_datetime(era5["time"]).dt.floor("D")).sort_index()
+    e = e[~e.index.duplicated(keep="last")]
+    rz = s4.rootzone(e).dropna()
+    if rz.empty:
+        raise ValueError("Brak wilgotności ERA5-Land do karty „Woda w winnicy”")
+    t = rz.index.max()
+    r0, r1 = cfg["CLIM_REF"]
+    hw = int(cfg["CLIM_HALF_WINDOW_DAYS"])
+    an = s4.clim_anomaly(rz, (r0, r1), hw)
+    ref = rz.loc[r0:r1]
+    pool = ref[s4._circ_doy_dist(ref.index.dayofyear.to_numpy(), t.dayofyear) <= hw]
+    theta, pct = float(rz.iat[-1]), float(an["percentile"].iat[-1])
+    med = float(pool.median()) if len(pool) else np.nan
+    step = float(cfg.get("WATER_ROUND_MM", 5))
+    deficit = step * round((med - theta) * 1000.0 / step) if np.isfinite(med) else np.nan
+
+    # Miejsce wśród lat: ten sam dzień kalendarza w każdym roku z danymi
+    vals = {}
+    for y in range(int(rz.index.min().year), int(t.year) + 1):
+        d = _same_day(y, t)
+        if d in rz.index:
+            vals[y] = float(rz.loc[d])
+    others = {y: v for y, v in vals.items() if y != t.year}
+    drier = sorted((y for y, v in others.items() if v < theta), key=lambda y: others[y])
+    wetter = sorted((y for y, v in others.items() if v > theta), key=lambda y: -others[y])
+
+    # Od kiedy: ciąg dekad (do ostatniej, także niepełnej) o średnim percentylu ≤ WATER_SINCE_PCT
+    thr = float(cfg.get("WATER_SINCE_PCT", 20))
+    dk_of_day = s4.dekad_end(pd.Series(an.index)).to_numpy()
+    dk = an["percentile"].groupby(dk_of_day).mean().sort_index()
+    run = []
+    for d, v in dk.iloc[::-1].items():
+        if not (np.isfinite(v) and v <= thr):
+            break
+        run.append(d)
+    since = an.index[pd.DatetimeIndex(dk_of_day).isin(pd.DatetimeIndex(run))].min() if run else None
+
+    # Opad: suma okna kończącego się w dniu t i mediana sum z tego samego okna kalendarza w latach normy
+    p = e["precip_mm"].asfreq("D") if "precip_mm" in e else pd.Series(dtype=float)
+    rain = {}
+    for n in cfg.get("WATER_PRECIP_DAYS", (30, 90)):
+        def window_sum(end):
+            w = p.loc[end - pd.Timedelta(days=int(n) - 1):end]
+            return float(w.sum()) if len(w) == int(n) and w.notna().mean() >= 0.9 else np.nan
+        cur = window_sum(t)
+        norm = [window_sum(_same_day(y, t)) for y in range(int(str(r0)[:4]), int(str(r1)[:4]) + 1)]
+        norm = [x for x in norm if np.isfinite(x)]
+        nm = float(np.median(norm)) if len(norm) >= 20 else np.nan
+        rain[int(n)] = {"mm": cur, "normal_mm": nm,
+                        "pct": 100.0 * cur / nm if np.isfinite(cur) and np.isfinite(nm) and nm > 0 else np.nan}
+
+    p_soil, p_date = np.nan, None
+    if status is not None and len(status) and "p_soil_drought" in status:
+        st = status[status["site_id"] == site_id].sort_values("date")
+        if len(st):
+            p_soil, p_date = _float(st["p_soil_drought"].iat[-1]), pd.Timestamp(st["date"].iat[-1])
+    code, label, color = water_category(pct, cfg)
+    return {"site_id": site_id, "date": t, "theta": theta, "water_mm": 1000.0 * theta, "median_mm": 1000.0 * med,
+            "percentile": pct, "category": {"code": code, "label": label, "color": color},
+            "deficit_mm": deficit, "rank_dry": len(drier) + 1, "rank_wet": len(wetter) + 1,
+            "n_years": len(others) + 1, "first_year": min(vals) if vals else None,
+            "drier_years": drier, "wetter_years": wetter,
+            "since": since, "since_dekads": len(run), "since_pct": thr, "rain": rain,
+            "p_soil": p_soil, "p_soil_dekad": p_date, "p_under_review": bool(cfg.get("WATER_P_UNDER_REVIEW", True)),
+            "clim_ref": (str(r0)[:4], str(r1)[:4]), "half_window": hw}
+
+
+def water_card_json(card: Dict[str, Any]) -> Dict[str, Any]:
+    """Karta jako JSON (agriwatch_latest.json, przyszła strona): daty ISO, NaN -> None."""
+    def conv(v):
+        if isinstance(v, pd.Timestamp):
+            return v.strftime("%Y-%m-%d")
+        if isinstance(v, dict):
+            return {str(k): conv(x) for k, x in v.items()}
+        if isinstance(v, (list, tuple)):
+            return [conv(x) for x in v]
+        if isinstance(v, (float, np.floating)):
+            return None if not np.isfinite(v) else round(float(v), 4)
+        if isinstance(v, np.integer):
+            return int(v)
+        return v
+    return conv(card)
+
+
+def water_card_lines(card: Dict[str, Any], lang: str = "pl") -> Dict[str, Any]:
+    """
+    Zdania karty: headline (kategoria i częstość), lines (niedobór, miejsce wśród lat, od kiedy, opad,
+    prawdopodobieństwo), footer (skala, opóźnienie, norma). lang = "pl" (dashboard) lub "en" (biuletyn).
+    """
+    pl = lang == "pl"
+    t, pct, code = card["date"], _float(card["percentile"]), card["category"]["code"]
+    c0, c1 = card["clim_ref"]
+    day = (f"{t.day} {MONTHS_GEN_PL[t.month - 1]}" if pl else f"{t.day} {MONTHS_EN[t.month - 1]}")
+    num = (lambda x, nd=0: _num(x, nd)) if pl else (lambda x, nd=0: "—" if not np.isfinite(_float(x)) else f"{x:.{nd}f}")
+    # Nagłówek: kategoria i jak często taki stan zdarza się o tej porze
+    if code.startswith("D"):
+        head = (f"{card['category']['label'].capitalize()} w glebie" if pl
+                else f"{WATER_LABEL_EN[code].capitalize()} in the soil")
+        if pct > 0:
+            every = max(1, int(round(100.0 / pct)))
+            head += (f" — tak sucho jest o tej porze średnio raz na {every} {plural_pl(every, 'rok', 'lata', 'lat')}"
+                     if pl and every > 1 else
+                     " — tak sucho jest o tej porze co roku" if pl else
+                     f" — this dry at this time of year about once in {every} years")
+        else:
+            head += (f" — suszej niż w każdym roku normy {c0}–{c1}" if pl else f" — drier than any year of {c0}–{c1}")
+    elif code == "W":
+        head = "Gleba wilgotniejsza niż zwykle o tej porze" if pl else "Soil wetter than usual for this time of year"
+    elif code == "N":
+        head = "Wilgotność gleby w normie dla tej pory roku" if pl else "Soil moisture near normal for this time of year"
+    else:
+        head = "Brak danych o wilgotności gleby" if pl else "No soil moisture data"
+    head += f" (percentyl {num(pct)} wobec {c0}–{c1})" if pl else f" (percentile {num(pct)} vs {c0}–{c1})"
+
+    lines = []
+    dm = _float(card["deficit_mm"])
+    if np.isfinite(dm):
+        if dm > 0:
+            lines.append(f"Brakuje ok. {num(dm)} mm wody w warstwie 0–100 cm względem typowego stanu na {day}." if pl
+                         else f"About {num(dm)} mm of water missing in the 0–100 cm layer compared with a typical {day}.")
+        elif dm < 0:
+            lines.append(f"Ok. {num(-dm)} mm wody więcej niż zwykle w warstwie 0–100 cm na {day}." if pl
+                         else f"About {num(-dm)} mm more water than usual in the 0–100 cm layer for {day}.")
+        else:
+            lines.append(f"Ilość wody w warstwie 0–100 cm zbliżona do typowej na {day}." if pl
+                         else f"Water in the 0–100 cm layer close to typical for {day}.")
+    n, y0 = card["n_years"], card["first_year"]
+    if n and y0:
+        dry_side = not np.isfinite(pct) or pct <= 50
+        rank = card["rank_dry"] if dry_side else card["rank_wet"]
+        years = card["drier_years"] if dry_side else card["wetter_years"]
+        word = ("najsuchszy" if dry_side else "najwilgotniejszy") if pl else ("driest" if dry_side else "wettest")
+        ordinal = {1: "st", 2: "nd", 3: "rd"}.get(rank if rank < 20 else rank % 10, "th")
+        txt = (f"{'N' if rank == 1 else f'{rank}. n'}{word[1:]} stan na {day} od {y0} r. "
+               f"({n} {plural_pl(n, 'rok', 'lata', 'lat')})" if pl
+               else f"{'The ' if rank == 1 else f'{rank}{ordinal} '}{word} {day} since {y0} ({n} years)")
+        if 1 < rank <= 5:
+            txt += (f"; bardziej {'sucho' if dry_side else 'wilgotno'} było w latach {', '.join(map(str, years[:rank - 1]))}"
+                    if pl else f"; {'drier' if dry_side else 'wetter'} in {', '.join(map(str, years[:rank - 1]))}")
+        lines.append(txt + ".")
+    if card["since"] is not None:
+        s = pd.Timestamp(card["since"])
+        k = card["since_dekads"]
+        lines.append(f"Susza w glebie (percentyl ≤ {num(card['since_pct'])}) od {s:%d.%m.%Y} — {k} "
+                     f"{plural_pl(k, 'dekada', 'dekady', 'dekad')}." if pl else
+                     f"Soil drought (percentile ≤ {num(card['since_pct'])}) since {s:%Y-%m-%d} — {card['since_dekads']} dekads.")
+    parts = []
+    for n_days, r in sorted(card["rain"].items()):
+        if np.isfinite(_float(r["mm"])):
+            pc = f", {num(r['pct'])}% normy" if pl else f", {num(r['pct'])}% of normal"
+            parts.append(f"{n_days} dni: {num(r['mm'])} mm{pc if np.isfinite(_float(r['pct'])) else ''}" if pl
+                         else f"{n_days} days: {num(r['mm'])} mm{pc if np.isfinite(_float(r['pct'])) else ''}")
+    if parts:
+        lines.append(("Opad (ERA5-Land): " if pl else "Rain (ERA5-Land): ") + "; ".join(parts) + ".")
+    ps = _float(card["p_soil"])
+    if np.isfinite(ps):
+        dk = card["p_soil_dekad"]
+        txt = (f"Szansa, że czujnik w gruncie (20–30 cm) też pokazuje suszę: {num(100 * ps)}%"
+               f"{f' (dekada do {pd.Timestamp(dk):%d.%m.%Y})' if dk is not None else ''}" if pl else
+               f"Chance that an in situ sensor (20–30 cm) also shows drought: {num(100 * ps)}%"
+               f"{f' (dekad ending {pd.Timestamp(dk):%Y-%m-%d})' if dk is not None else ''}")
+        if card["p_under_review"]:
+            txt += (" — liczba w rewizji (kontrola czujników referencyjnych, A4)" if pl
+                    else " — under review (reference sensor quality control, A4)")
+        lines.append(txt + ".")
+    footer = (f"Okolica (~9 km, model ERA5-Land), nie pomiar w działce. Stan na {t:%d.%m.%Y}; dane ERA5-Land dochodzą "
+              f"z ok. 5-dniowym opóźnieniem. Norma: {c0}–{c1}, ±{card['half_window']} dni. Kategorie suszy wg progów "
+              f"US Drought Monitor." if pl else
+              f"Area (~9 km, ERA5-Land model), not a measurement in the parcel. State on {t:%Y-%m-%d}; ERA5-Land arrives "
+              f"with a ~5-day delay. Normal: {c0}–{c1}, ±{card['half_window']} days. Drought categories follow US Drought "
+              f"Monitor percentile thresholds.")
+    return {"headline": head, "lines": lines, "footer": footer}
+
+
+def _selftest_water(cfg: Dict[str, Any]) -> None:
+    """
+    Karta „Woda w winnicy” na syntetycznym ERA5 1991–2026 (cykl roczny, bez szumu w normie) z ostatnimi 100 dniami
+    osuszonymi: kategoria D4, niedobór > 0, 1. miejsce wśród lat, początek ciągu w pierwszej suchej dekadzie,
+    percentyl zgodny z s4.clim_anomaly, opad 0% normy; wariant mokry: kategoria W, brak „Brakuje”. Granice kategorii.
+    """
+    days = pd.date_range("1991-01-01", "2026-09-30", freq="D")
+    seas = 0.30 + 0.06 * np.cos(2 * np.pi * (days.dayofyear.to_numpy() - 30) / 365.25)
+    yr = ((days.year.to_numpy() - 1995) % 7 - 3) * 0.004               # różne lata; rok 2026 dokładnie w środku
+    era = pd.DataFrame({"time": days, "sm_l1": seas + yr, "sm_l2": seas + yr, "sm_l3": seas + yr,
+                        "precip_mm": 2.0})
+    dry = era["time"] >= pd.Timestamp("2026-06-22")
+    for c in ("sm_l1", "sm_l2", "sm_l3"):
+        era.loc[dry, c] -= 0.12
+    era.loc[dry, "precip_mm"] = 0.0
+    card = water_card(era, None, cfg, "X")
+    assert card["category"]["code"] == "D4" and card["deficit_mm"] > 0 and card["rank_dry"] == 1, card
+    assert card["since"] == pd.Timestamp("2026-06-21"), card["since"]       # dekada 21–30 VI: większość dni sucha
+    rz = s4.rootzone(era.set_index("time"))
+    ref = s4.clim_anomaly(rz, cfg["CLIM_REF"], cfg["CLIM_HALF_WINDOW_DAYS"])["percentile"].iat[-1]
+    assert abs(card["percentile"] - ref) < 1e-9 and card["rain"][30]["pct"] == 0.0, (card["percentile"], ref)
+    txt = water_card_lines(card)
+    assert "Wyjątkowa susza w glebie" in txt["headline"] and txt["lines"][0].startswith("Brakuje ok."), txt
+    assert "w rewizji" not in " ".join(txt["lines"])                       # bez statusu nie ma prawdopodobieństwa
+    en = water_card_lines(card, "en")
+    assert en["headline"].startswith("Exceptional drought") and "missing" in en["lines"][0], en
+    wet = era.copy()
+    for c in ("sm_l1", "sm_l2", "sm_l3"):
+        wet.loc[dry, c] += 0.24
+    cw = water_card(wet, None, cfg, "X")
+    lw = water_card_lines(cw)
+    assert cw["category"]["code"] == "W" and cw["since"] is None and cw["deficit_mm"] < 0, cw
+    assert not any(x.startswith("Brakuje") for x in lw["lines"]) and "najwilgotniejszy" in " ".join(lw["lines"]).lower(), lw
+    assert [plural_pl(k, "rok", "lata", "lat") for k in (1, 2, 5, 12, 22, 34, 36)] == \
+        ["rok", "lata", "lat", "lat", "lata", "lata", "lat"]
+    assert [water_category(p, cfg)[0] for p in (0, 2, 2.01, 5, 10, 20, 30, 30.1, 69.9, 70, 100)] == \
+        ["D4", "D4", "D3", "D3", "D2", "D1", "D0", "N", "N", "W", "W"]
+    import json
+    json.dumps(water_card_json(card))
+    print(f"[OK] Karta „Woda w winnicy”: {txt['headline']}; {txt['lines'][0]}")
+
+
+# ==============================================================================
 # IV. TESTY (wywoływane z selftestu step_05)
 # ==============================================================================
 
