@@ -490,9 +490,8 @@ def task_ingest_s2(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
 def task_probe_swi(rt: Dict[str, Any], cfg: Dict[str, Any], days: int = 31) -> Dict[str, Any]:
     """
     Sonda dostępu do satelitarnego SWI 1 km (Plan v9 W3a, D-078): klucze z SECRETS_DIR (tylko nazwy), logowanie
-    do Copernicus Data Space, opis kolekcji, SWI piksela winnicy w ostatnich dniach i w oknach archiwalnych,
-    kolekcje SWI w katalogu STAC, werdykt. Wynik w swi_probe.json (bez kluczy). Bez analizy — pełne pobieranie
-    i karta po odczytaniu wyniku sondy.
+    do Copernicus Data Space, SWI piksela winnicy — bieżące dni w wersji 2, archiwum w wersji 1, ich wspólny okres —
+    i werdykt. Wynik w swi_probe.json (bez kluczy). Bez analizy — pełne pobieranie i karta po odczytaniu wyniku sondy.
     """
     import step_01_ingest as s1
     lon, lat = _main_site_lonlat(cfg)

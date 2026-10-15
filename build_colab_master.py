@@ -64,10 +64,10 @@ cfg = monitor_config(rt)   # zmiany: monitor_config(rt, {'VINEYARDS': {'VINEYARD
 run_task(rt, 'ingest_era5', task_ingest_era5, rt, cfg)"""),
     ("md", """## 3b. Satelitarny SWI 1 km — sonda dostępu (Plan v9 W3a)
 Copernicus Land Soil Water Index 1 km (radar Sentinel-1 + ASCAT) przez Copernicus Data Space. Sonda sprawdza tylko
-dostęp: klucze w `secrets/` (nazwy pól, bez wartości), logowanie, zakres czasu kolekcji, SWI piksela winnicy w ostatnich
-dniach i w oknach archiwalnych (VI 2025, VII 2020) z błędami serwera, kolekcje SWI w katalogu STAC (wersja 2) i werdykt.
-Bez analizy. **Prześlij wynik tej komórki** — na jego podstawie powstaje pełne pobieranie i wiersz na karcie.
-Metoda: `docs/evidence/W3a_SWI_1km_satelita.md` (wynik sondy #1 w §4)."""),
+dostęp: klucze w `secrets/` (nazwy pól, bez wartości), logowanie, SWI piksela winnicy w dwóch wersjach produktu —
+wersja 1 (archiwum 2015 – 12 VII 2025) i wersja 2 (od VII 2025, bieżące dni) — oraz ich wspólny okres, błędy serwera
+i werdykt. Bez analizy. **Prześlij wynik tej komórki** — na jego podstawie powstaje pełne pobieranie i wiersz na karcie.
+Metoda: `docs/evidence/W3a_SWI_1km_satelita.md` (wyniki sond w §4)."""),
     ("code", """import json
 RUN_SWI_PROBE = True          # po zakończeniu W3a sonda zostanie zastąpiona pobieraniem SWI
 if RUN_SWI_PROBE:

@@ -1,7 +1,8 @@
 # W3a — satelitarna wilgotność gleby: CLMS Soil Water Index 1 km (notatka metodyczna)
 
 > **Status:** `PROPOSED` (2026-10-14) — metoda ustalona **przed** pobraniem danych SWI i przed jakąkolwiek walidacją
-> (pre-rejestracja jak w A4). Plan v9, krok W3a (D-072). Sonda #1: 2026-10-15 (§4); sonda #2 w toku.
+> (pre-rejestracja jak w A4). Plan v9, krok W3a (D-072). Sonda #1: 2026-10-15 (§4); identyfikatory obu wersji
+> potwierdzone w dokumentacji CDSE; sonda #2 w toku.
 
 ## Wynik w skrócie
 
@@ -72,12 +73,21 @@ za 14 IX – 15 X 2026, a filtr katalogu Sentinel Hub nie znalazł kolekcji SWI.
 - **Wyjaśnienie (hipoteza):** strona produktu CLMS opisuje wersję 1 jako **zastąpioną**, z danymi 2015 – VII 2025;
   od 2025 r. jest wersja 2 (COG). Brak bieżących dni w kolekcji wersji 1 jest więc oczekiwany i sam nie dowodzi
   złego identyfikatora.
-- **Sonda #2:** opis kolekcji z zakresem czasu; okna VI 2025 i VII 2020 obok ostatnich dni; liczba błędów serwera
-  i pierwszy komunikat; kolekcje SWI w publicznym katalogu STAC wraz z plikami wersji 2 nad winnicą i sposobem
-  dostępu do nich; werdykt w jednym zdaniu.
-- **Konsekwencja dla D-077:** archiwum (wersja 1) i bieżące dni (wersja 2) pochodzą z dwóch wersji produktu.
-  Przed połączeniem porównujemy je w okresie wspólnym, jeśli taki jest. Jeśli go nie ma, normę liczymy z wersji 1,
-  a bieżący percentyl z wersji 2 opisujemy jako „między wersjami, niesprawdzone” — do decyzji po sondzie #2.
+- **Potwierdzenie w dokumentacji (2026-10-15, dokumentacja Copernicus Data Space, Sentinel Hub, CLMS) [P]:**
+  - wersja 1: `byoc-bd02588b-7236-4b1e-9480-aeae7dce3c7a` (ten sam identyfikator co w kodzie legacy),
+    dane od 2015-01-01 do 2025-07-12;
+  - wersja 2: `byoc-4bd995a1-dc49-4176-a285-b1d0084ba51a`, od VII 2025 do dziś;
+  - w obu wersjach pasma SWI002…SWI100 i QFLAG002…QFLAG100 (UINT8, skala 1/2, %) oraz SSF (stan powierzchni 0–3,
+    np. zamarznięta gleba).
+  Brak bieżących dni w sondzie #1 wynikał więc z końca wersji 1, a nie z błędnego identyfikatora.
+- **Sonda #2:** bieżące dni w wersji 2, okno VII 2020 w wersji 1 oraz VII 2025 w obu wersjach (wspólne dni);
+  liczba błędów serwera z pierwszym komunikatem; werdykt w jednym zdaniu.
+- **Konsekwencja dla D-077:** norma 2015–2024 pochodzi z wersji 1, a bieżący percentyl z wersji 2. Przed
+  połączeniem porównujemy je we wspólnym okresie, jeśli taki jest (z dokumentacji wynika najwyżej kilka dni w VII 2025).
+  Jeśli wspólnego okresu prawie nie ma, decyzja przed kodem: (a) percentyl wersji 2 wobec normy wersji 1 z dopiskiem
+  „między wersjami produktu, przesunięcie niesprawdzone” albo (b) sprawdzenie przesunięcia w opisie zmian wersji 2
+  (dokument jakości CLMS). Rozstrzygniemy po sondzie #2.
+- **Do sprawdzenia przy pobieraniu:** flagi jakości QFLAG (próg z PUM) i SSF (dni z zamarzniętą glebą pomijamy).
 
 ## 5. Sprawdzenie (D-067) i karta wyników (D-070)
 
@@ -129,6 +139,10 @@ Poziom dostępu: P = pełny tekst, A = abstrakt lub streszczenie, F = fragment z
   https://land.copernicus.eu/en/technical-library/algorithm-theoretical-basis-document-soil-water-index/@@download/file [F]
 - CLMS: strona jakości produktu (walidacja europejska 2015–2019):
   https://land.copernicus.eu/api/en/products/soil-moisture/daily-soil-water-index-europe-v1-0-1km/quality [F]
+- Copernicus Data Space Ecosystem, dokumentacja Sentinel Hub — CLMS SWI Europe 1 km daily v1 i v2 (identyfikatory
+  kolekcji BYOC, pasma, skala, zakres czasu):
+  https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Data/clms/bio-geophysical-parameters/soil-moisture/soil-water-index/swi_europe_1km_daily_v1.html,
+  …/swi_europe_1km_daily_v2.html [P]
 - FEDEO: rekord kolekcji CLMS SWI Europe 1 km daily v2 (COG):
   https://fedeo.ceos.org/series/eo:platform/Sentinel-1/clms_swi_europe_1km_daily_v2_cog [F]
 - Bauer-Marschallinger B. i in. 2018. Soil Moisture from Fusion of Scatterometer and SAR: Closing the Scale Gap with

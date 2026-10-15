@@ -63,8 +63,9 @@ percentyl 2 wobec 1991–2020), niedobór ok. 45 mm w 0–100 cm, 2. najsuchszy 
 w 2011), susza od 1 VI (13 dekad), opad 30 dni 65% i 90 dni 54% normy, szansa potwierdzenia przez czujnik 49%.
 Poprawki po przeglądzie: częstość w nagłówku (D-079) i forma „w roku 2011”. Sonda SWI #1: logowanie działa,
 kolekcja z kodu legacy nie zwróciła danych za ostatnie 31 dni. Strona produktu CLMS opisuje wersję 1 jako
-zastąpioną, z danymi 2015 – VII 2025, więc brak bieżących dni jest oczekiwany; sonda #2 sprawdza okna archiwalne,
-błędy serwera i kolekcje SWI w katalogu STAC (wersja 2).
+zastąpioną, z danymi 2015 – VII 2025, więc brak bieżących dni jest oczekiwany. Dokumentacja CDSE potwierdza:
+wersja 1 (identyfikator z legacy) do 12 VII 2025, wersja 2 osobną kolekcją od VII 2025; te same pasma i skala.
+Sonda #2 sprawdza bieżące dni w wersji 2, archiwum w wersji 1 i ich wspólny okres (D-077).
 
 **Po prototypie (osobna decyzja):** W3 — publikacja karty na GeoWorldLook (Supabase, mapa); W7 — automatyczna
 cotygodniowa aktualizacja (GitHub Actions, ERA5-Land z Copernicus Climate Data Store). To część etapu E Planu v8.
