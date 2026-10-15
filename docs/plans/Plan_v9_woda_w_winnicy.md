@@ -24,7 +24,9 @@ miejscach z pomiarami w gruncie: Condom (obszar główny) i obszar pomocniczy (D
 - W3a (2026-10-15, decyzja: „najnowsze dane, docelowo czas zbliżony do rzeczywistego”): wdrożone pobieranie
   CLMS SWI 0,1° v4 (nowa generacja 2025, dane do 24 h po pomiarze, jedna wersja od 2007) do wiersza satelity na karcie
   oraz SWI 1 km v2 (od 13 VII 2025), zbierany bez normy; T = 15, norma 2007–2024, zgodność klas ERA5–SWI (D-080) w
-  „Na ile ufać”. Czeka na pierwszy przebieg w Colab. Szczegóły: `docs/evidence/W3a_SWI_1km_satelita.md` §0.
+  „Na ile ufać”. **Pierwszy przebieg (2026-10-15):** satelita na 14.10 suszej niż w każdym roku 2007–2024 o tej porze,
+  zgodnie z modelem; zgodność klas ERA5–SWI 2007–2024: 63% dni [59; 68], kappa 0,44 [0,36; 0,52] (umiarkowana);
+  T = 10: 61%, T = 40: 65%. Szczegóły: `docs/evidence/W3a_SWI_1km_satelita.md` §0 pkt 8.
 - Referencja naziemna: ISMN (Condom) niedostępny; zaproponowane FR-Lus i FR-Aur z sieci ICOS
   (`docs/evidence/REF_obszar_pomocniczy_ICOS.md`, D-082, do akceptacji).
 - Słabości, o których piszemy wprost: jedna stacja naziemna z artefaktami czujników (A4), alarm z NDVI bez trafień,
@@ -115,6 +117,7 @@ Wynik „brak poprawy” też wpisujemy. Tabela żyje w `docs/evidence/karta_wyn
 | Krok | Czy zmienia trafność | Co porównujemy |
 |---|---|---|
 | W1 karta | nie — te same liczby inaczej podane | nic; zapisujemy wprost, że to zmiana prezentacji |
+| W3a satelita | nowe, niezależne źródło (nie zmienia kategorii ERA5) | zgodność klas ERA5–SWI 2007–2024: 63% [59; 68], kappa 0,44 [0,36; 0,52] (2026-10-15); trafność SWI wobec czujników — po W2 i REF |
 | W2 A4 | zmienia referencję, nie produkt | stara i nowa reguła statusu policzone na tej samej, poprawionej referencji: POD/FAR suchych dekad, Brier prawdopodobieństwa (W1/W2/W3 z notatki A4) |
 | W4 7 dni | nowy element | błąd zmiany niedoboru wobec punktu odniesienia „bez zmian przez 7 dni” |
 | W5 30 dni | nowy element | Brier wobec klimatologii i wobec „susza dziś = susza za 30 dni”; poprawa tylko, gdy lepszy od obu |

@@ -41,7 +41,19 @@ Dwie rzeczy zmieniają ustalenia z 2026-10-14, zanim pobraliśmy jakikolwiek sze
    **bez percentyla**: 15 miesięcy to najwyżej dwie wartości na dzień roku. Norma z lat 2025–2026 opisywałaby „typowy”
    stan dwoma latami, z których 2026 jest drugim najsuchszym od 1991 r. (karta W1) — susza wyglądałaby na normę.
    Do karty 1 km wejdzie, gdy własna historia pozwoli na percentyl (decyzja po walidacji wobec FR-Lus, D-082).
-7. **Wdrożenie:** `step_01.sync_swi_point` (fragmenty kwartalne w cache, ponawianie 401/429/5xx), `clean_swi` (flagi
+8. **Wynik pierwszego przebiegu na prawdziwych danych (2026-10-15, Colab):**
+   - pobrane: v4 0,1° — 6684 dni z danymi (2007-01-02 – 2026-10-14), v2 1 km — 453 dni (2025-07-13 – 2026-10-13);
+     dni z flagą producenta: 0 w obu produktach;
+   - stan bieżący: SWI T = 15 na 14.10.2026 suszej niż w każdym roku 2007–2024 o tej porze (percentyl 0) — klasa
+     „sucho”; na wspólny dzień 06.10.2026 zgodnie z ERA5-Land (oba: sucho);
+   - **zgodność klas ERA5–SWI w latach 2007–2024 (D-080): 63% dni [59; 68], kappa = 0,44 [0,36; 0,52]**;
+     wrażliwość na T: T = 10 — 61%, T = 40 — 65% (wynik mało zależny od T, jak u Albergel i in. 2008);
+   - interpretacja: przy rozkładzie klas ok. 30 / 40 / 30% zgodność przypadkowa wynosi ok. 34%, więc 63% to wyraźnie
+     więcej niż przypadek, ale w ok. 37% dni źródła wskazują różne klasy. Kappa 0,41–0,60 to w skali Landis i Koch
+     (1977) „umiarkowana” zgodność [W]. Dwa niezależne źródła (model 0–100 cm i radar ~górne 30 cm) potwierdzają się
+     więc częściowo — dlatego karta pokazuje oba i mówi wprost, czy dziś się zgadzają. Wynik wpisany bez dobierania
+     T ani normy.
+9. **Wdrożenie:** `step_01.sync_swi_point` (fragmenty kwartalne w cache, ponawianie 401/429/5xx), `clean_swi` (flagi
    producenta 241–255 → brak), `step_05.task_ingest_swi`, `step_09.water_satellite` i `swi_agreement` (bootstrap po
    latach), wiersz na karcie i w „Na ile ufać”; konfiguracja `SWI_*` w `MONITOR_CONFIG`.
 

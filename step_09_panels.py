@@ -1208,10 +1208,17 @@ def water_card_lines(card: Dict[str, Any], lang: str = "pl") -> Dict[str, Any]:
     if sat:
         cl = SWI_CLASS_PL if pl else SWI_CLASS_EN
         ts = pd.Timestamp(sat["date"])
-        txt = (f"Satelita (radar ASCAT, okolica ~10 km, SWI T = {sat['T']}), stan na {ts:%d.%m.%Y}: percentyl "
-               f"{num(sat['percentile'])} wobec {sat['norm'][0]}–{sat['norm'][1]} — {cl[sat['class']]}" if pl else
-               f"Satellite (ASCAT radar, area ~10 km, SWI T = {sat['T']}), as of {ts:%Y-%m-%d}: percentile "
-               f"{num(sat['percentile'])} vs {sat['norm'][0]}–{sat['norm'][1]} — {cl[sat['class']]}")
+        n0, n1 = sat["norm"]
+        sp = _float(sat["percentile"])
+        # skrajne percentyle słowami (jak w nagłówku karty): poza zakresem wszystkich lat normy o tej porze
+        extreme = ((f"suszej niż w każdym roku {n0}–{n1} o tej porze" if sp == 0 else
+                    f"wilgotniej niż w każdym roku {n0}–{n1} o tej porze") if pl else
+                   (f"drier than in any year {n0}–{n1} at this time of year" if sp == 0 else
+                    f"wetter than in any year {n0}–{n1} at this time of year")) if sp in (0.0, 100.0) else None
+        txt = (f"Satelita (radar ASCAT, okolica ~10 km, SWI T = {sat['T']}), stan na {ts:%d.%m.%Y}: "
+               + (extreme if extreme else f"percentyl {num(sp)} wobec {n0}–{n1}") + f" — {cl[sat['class']]}" if pl else
+               f"Satellite (ASCAT radar, area ~10 km, SWI T = {sat['T']}), as of {ts:%Y-%m-%d}: "
+               + (extreme if extreme else f"percentile {num(sp)} vs {n0}–{n1}") + f" — {cl[sat['class']]}")
         if sat.get("agree") is not None:
             tc = pd.Timestamp(sat["common_date"])
             if sat["agree"]:
@@ -1392,6 +1399,8 @@ def _selftest_water(cfg: Dict[str, Any]) -> None:
     assert "Satelita a model: ta sama klasa" in ts_ and "kappa" in ts_ and "T = 10:" in ts_, ts_
     assert card["satellite"] is None and "Satelita" not in " ".join(water_card_lines(card)["lines"])
     json.dumps(water_card_json(cs_))
+    ex_ = " ".join(water_card_lines(dict(cs_, satellite=dict(sat, percentile=0.0)))["lines"])
+    assert "stan na 13.10.2026: suszej niż w każdym roku 2007–2024 o tej porze — sucho" in ex_, ex_
     wet = era.copy()
     for c in ("sm_l1", "sm_l2", "sm_l3"):
         wet.loc[dry, c] += 0.24
