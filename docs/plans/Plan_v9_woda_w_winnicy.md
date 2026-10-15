@@ -29,6 +29,16 @@ miejscach z pomiarami w gruncie: Condom (obszar główny) i obszar pomocniczy (D
   T = 10: 61%, T = 40: 65%. Szczegóły: `docs/evidence/W3a_SWI_1km_satelita.md` §0 pkt 8.
 - Referencja naziemna: ISMN (Condom) niedostępny w sieci (pliki do 2024 r. są na Dysku); FR-Lus i FR-Aur z sieci ICOS
   zatwierdzone (D-082). W2 + REF w toku: protokół zarejestrowany przed liczeniem (D-083).
+- **W2 + REF wdrożone w kodzie (2026-10-15):** `step_07.a4_variants` (reguły A4, warianty W1/W2/W3 i wrażliwość progu),
+  `step_10_reference.py` (ICOS: pobieranie, QC, warstwy, wspólna `validate_layer`), `task_ref_validate`, sekcja 5b
+  notatnika, sekcja raportu. Czeka na pierwszy przebieg w Colab (ERA5 przez GEE i SWI z kluczami są dostępne tylko tam).
+  Szczegóły implementacji, których protokół nie rozstrzygał: dzień z flagami LOW_IMPLAUSIBLE i FAST_DROP naraz
+  traktujemy jak FAST_DROP (brak danych); w wariancie W1 strefa korzeni dnia z jednym czujnikiem cenzurowanym = średnia
+  z θ_dno i drugiego czujnika. Kontrola liczby oznaczeń A4 na plikach ISMN (bez metryk produktu): FAST_DROP 38 dni
+  (20 cm) i 26 (30 cm), średnia < 0,10: 784 i 931 dni — zgodnie z `docs/evidence/A4_QC/a4_explore.log` po uwzględnieniu
+  dotychczasowego QC (zamrożone wartości, min. 18 h w dniu). Opis danych ICOS (bez metryk produktu): FR-Lus 1382 dni
+  warstwy 20–30 cm (2022-11-29 – 2026-10-14, w tym 44 dni NRT), bez oznaczeń; FR-Aur 2003 dni na 0,30 m (2019 – X 2025),
+  FAST_DROP 18 dni; 14 dni z wartością < 0,10 — wszystkie w suchym 2022 r. (do opisania jako obserwacja).
 - Słabości, o których piszemy wprost: jedna stacja naziemna z artefaktami czujników (A4), alarm z NDVI bez trafień,
   brak prawdy terenowej o wodzie w samej winnicy, krótkie normy danych satelitarnych.
 

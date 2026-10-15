@@ -79,6 +79,13 @@ STATION_CONFIG: Dict[str, Any] = {
         ("2019-02-06", "2019-02-21", 0.05, "QC-1: artefakt wymiany czujnika 5 cm (ML3 -> ML2x)"),
     ],
     "DAILY_MIN_HOURS": 18,           # minimalna liczba godzin do średniej dobowej
+    # --- A4: utrata kontaktu w glinie, 20 i 30 cm (docs/evidence/A4_QC_czujnikow_ISMN.md §3–4, D-060–D-063;
+    #     SHA-256 sekcji przed wdrożeniem w Planie v8 i v9) ---
+    "A4_THETA_FLOOR": 0.10,          # LOW_IMPLAUSIBLE: średnia dobowa < θ_dno
+    "A4_FAST_DROP": 0.05,            # FAST_DROP: spadek > 0,05 m3/m3 ...
+    "A4_FAST_DROP_HOURS": 6,         # ... w <= 6 h (cały dzień oznaczony)
+    "A4_WP": {0.20: 0.271, 0.30: 0.273},   # punkt więdnięcia (Saxton i Rawls 2006; a4_explore.log) — wrażliwość 0,5·WP
+    "A4_FLOOR_SENS": 0.15,           # druga wartość wrażliwości θ_dno
 
     # --- Sentinel-1 change detection ---
     "CD_CALIBRATION": ("2016-01-01", "2021-12-31"),
@@ -262,6 +269,70 @@ def insitu_daily(df_qc: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     daily = daily[daily["n_hours"] >= cfg["DAILY_MIN_HOURS"]]
     daily.index.name = "date"
     return daily
+
+
+def fast_drop_days(sm: pd.Series, step: str = "1h", hours: int = 6, thr: float = 0.05) -> pd.DatetimeIndex:
+    """
+    A4 FAST_DROP: dni, w których wartość spada o > thr w <= hours godzin. Na regularnej siatce `step`: maksimum
+    z bieżącego i poprzednich pomiarów w oknie `hours` minus bieżąca wartość (jak docs/evidence/A4_QC/a4_explore.py).
+    """
+    s = sm.dropna().sort_index()
+    s = s[~s.index.duplicated(keep="last")]
+    if s.empty:
+        return pd.DatetimeIndex([])
+    s = s.asfreq(step)
+    n = int(pd.Timedelta(hours=hours) / pd.Timedelta(step)) + 1
+    drop = (s.rolling(n, min_periods=2).max() - s) > thr
+    return pd.DatetimeIndex(drop[drop].index.normalize().unique())
+
+
+def a4_variants(depth_m: float, overrides: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
+    """
+    Średnie dobowe czujnika 20 lub 30 cm po dotychczasowym QC i regułach A4 (notatka A4 §3–4), w wariantach:
+      W1        — główny: dzień LOW_IMPLAUSIBLE (średnia < θ_dno) -> wartość θ_dno i flaga „cenzurowany”;
+                  dzień FAST_DROP -> brak danych (dzień z obiema flagami traktujemy jak FAST_DROP),
+      W2        — wykluczenie: dni LOW_IMPLAUSIBLE i FAST_DROP -> brak danych,
+      W3        — bez nowego QC (jak dotąd),
+      W1_05WP, W1_015 — wariant W1 z θ_dno = 0,5·WP i 0,15 (wrażliwość).
+    Kolumny: sm, censored, low, fast.
+    """
+    c = build_config({**overrides, "DEPTH_M": depth_m})
+    q = qc_insitu(load_insitu(c), c)
+    base = insitu_daily(q, c)[["sm"]].copy()
+    fast = fast_drop_days(q.loc[q["qc_ok"], "sm"], "1h", int(c["A4_FAST_DROP_HOURS"]), float(c["A4_FAST_DROP"]))
+    is_fast = base.index.normalize().isin(fast)
+    wp = float(c["A4_WP"].get(round(depth_m, 2), np.nan))
+    floors = {"W1": float(c["A4_THETA_FLOOR"]), "W1_05WP": 0.5 * wp, "W1_015": float(c["A4_FLOOR_SENS"])}
+    out: Dict[str, pd.DataFrame] = {}
+    for name, fl in floors.items():
+        d = base.copy()
+        d["low"], d["fast"] = d["sm"] < fl, is_fast
+        d["censored"] = d["low"] & ~d["fast"]
+        d.loc[d["fast"], "sm"] = np.nan
+        d.loc[d["censored"], "sm"] = fl
+        out[name] = d
+    d = base.copy()
+    d["low"], d["fast"] = d["sm"] < floors["W1"], is_fast
+    d["censored"] = False
+    d.loc[d["low"] | d["fast"], "sm"] = np.nan
+    out["W2"] = d
+    d = base.copy()
+    d["low"], d["fast"], d["censored"] = d["sm"] < floors["W1"], is_fast, False
+    out["W3"] = d
+    return out
+
+
+def a4_flag_report(v20: Dict[str, pd.DataFrame], v30: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Raport A4 (notatka §5): liczba dni oznaczonych per rok, głębokość i reguła (z progami wrażliwości)."""
+    rows = []
+    for depth, v in ((20, v20), (30, v30)):
+        for y, g in v["W3"].groupby(v["W3"].index.year):
+            r = {"year": int(y), "depth_cm": depth, "days": int(g["sm"].notna().sum()),
+                 "fast_drop": int(g["fast"].sum()), "low_010": int(v["W1"].loc[g.index, "low"].sum()),
+                 "low_05wp": int(v["W1_05WP"].loc[g.index, "low"].sum()),
+                 "low_015": int(v["W1_015"].loc[g.index, "low"].sum())}
+            rows.append(r)
+    return pd.DataFrame(rows)
 
 
 # ==============================================================================

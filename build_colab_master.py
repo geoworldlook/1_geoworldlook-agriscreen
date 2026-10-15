@@ -55,7 +55,8 @@ print('Projekt:', PROJECT_DIR)"""),
     ("md", "## 2. Środowisko: pakiety, GEE, rejestr, konfiguracja"),
     ("code", """from step_05_colab_run import (setup_runtime, monitor_config, run_task, run_history, registry_summary,
                                task_ingest_s2, task_ingest_era5, task_ingest_swi, task_scene_stats, task_anomalies,
-                               task_validate, task_weather, task_bulletin, task_dashboard, task_summary)
+                               task_validate, task_weather, task_ref_validate, task_bulletin, task_dashboard,
+                               task_summary)
 from step_06_dashboard import show_dashboard
 rt = setup_runtime(PROJECT_DIR, gee_project='ee-geoworldlook', pull=False)
 cfg = monitor_config(rt)   # zmiany: monitor_config(rt, {'VINEYARDS': {'VINEYARD_06': 6, 'VINEYARD_07': 7}})"""),
@@ -78,6 +79,13 @@ Tmin, Tmax, opadu i SPI oraz kalibracja progów przymrozku i upału. Pierwsze ur
 run_task(rt, 'validate', task_validate, rt, cfg)
 run_task(rt, 'weather', task_weather, rt, cfg)
 run_task(rt, 'bulletin', task_bulletin, rt, cfg)"""),
+    ("md", """## 5b. Walidacja na stacjach referencyjnych (Plan v9 W2 + REF)
+Jeden protokół, zarejestrowany przed liczeniem (`docs/evidence/W2_REF_protokol_walidacji.md`, D-083): ERA5-Land
+0–100 cm i satelitarny SWI wobec pomiarów w gruncie na trzech miejscach — **Condom** (ISMN 20–30 cm po kontroli
+czujników A4), **Auradé** w Gers (ICOS, 2019–2025) i **Lusignan** (ICOS, dane bieżące). Pierwsze uruchomienie pobiera
+dane ICOS oraz ERA5 i SWI w punktach stacji (kilkanaście minut), kolejne korzystają z cache. Wyniki w raporcie (sekcja 7)
+i w `validation_reference.csv`. **Prześlij wynik** — na jego podstawie uzupełnimy „Na ile ufać” na karcie."""),
+    ("code", "run_task(rt, 'ref_validate', task_ref_validate, rt, cfg)"),
     ("md", """## 6. Dashboard winnicy
 Od góry: **karta „Woda w glebie”** (kategoria suszy, niedobór, miejsce wśród lat, od kiedy, opad, prawdopodobieństwo,
 „Na ile ufać”), krzywa sezonu, pogoda, prognoza, przymrozki i upały; niżej „Roślinność działki (informacyjnie)” (mapa

@@ -412,6 +412,9 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "SWI_NORM": ("2007-01-01", "2024-12-31"),  # D-076: wspólna norma SWI i ERA5 dla reguły zgodności
     "SWI_DRY_PCT": 30,                    # reguła zgodności: ≤ 30 sucho, 30–70 norma, ≥ 70 (WATER_WET_PCT) wilgotno
     "SWI_1KM": True,                      # zbieramy też SWI 1 km v2 (od 13 VII 2025): bez normy do dłuższej historii
+    # Stacje referencyjne (Plan v9 W2 + REF; protokół docs/evidence/W2_REF_protokol_walidacji.md, D-082, D-083)
+    "REF_DIR": "data/09_Reference_Stations",
+    "REF_SITES": ("FR-Aur", "FR-Lus"),
     # Progi statusu (EDO CDI)
     "THR_SPI1": -2.0, "THR_SPI3": -1.0, "THR_SMA": -1.0, "THR_VEG": -1.0,
     "STATUS_START": "2016-01-01",
@@ -450,7 +453,7 @@ MONITOR_CONFIG: Dict[str, Any] = {
 }
 
 _PATH_KEYS = ("PARCELS_PATH", "AOI_PATH", "ISMN_DIR", "S2_DIR", "S2_MANIFEST", "ERA5_DIR", "SR_MODEL_DIR", "MF_DIR",
-              "SR_DIR", "OUTPUT_DIR", "SECRETS_DIR", "SWI_DIR")
+              "SR_DIR", "OUTPUT_DIR", "SECRETS_DIR", "SWI_DIR", "REF_DIR")
 
 
 def monitor_config(rt: Dict[str, Any], overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -830,6 +833,87 @@ def task_validate(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     return {"message": msg, "registry": {"gwl_validation_metrics": val}}
 
 
+def task_ref_validate(rt: Dict[str, Any], cfg: Dict[str, Any], cdse_session: Any = None, icos_session: Any = None,
+                      era5_fetch: Any = None) -> Dict[str, Any]:
+    """
+    W2 + REF (Plan v9; protokół zarejestrowany przed liczeniem, D-083): ta sama walidacja warstwy wody na trzech
+    miejscach — Condom (ISMN 20–30 cm po regułach A4: W1 główny, W2, W3, wrażliwość progu), FR-Aur i FR-Lus (ICOS).
+    Produkty: ERA5-Land 0–100 cm i SWI v4 (T = SWI_T, wrażliwość SWI_T_SENS) w pikselu każdego miejsca.
+    Wyniki: validation_reference.csv (+ gwl_validation_metrics), validation_reference_qc.csv, a4_flags.csv,
+    reference_current.json (kontrola bieżąca FR-Lus). Błąd jednego miejsca nie zatrzymuje pozostałych.
+    """
+    import step_01_ingest as s1
+    import step_07_station_pipeline as s7
+    import step_09_panels as s9
+    import step_10_reference as s10
+    from step_04_metrics_alert import rootzone
+    out = cfg["OUTPUT_DIR"]
+    os.makedirs(out, exist_ok=True)
+    overrides = {"PROJECT_DIR": cfg["PROJECT_DIR"], "NETWORK": cfg["NETWORK"], "STATION": cfg["STATION"],
+                 "BOOTSTRAP_N": cfg["BOOTSTRAP_N"], "STATION_BUFFER_M": cfg["STATION_BUFFER_M"]}
+    s7cfg = s7.build_config(overrides)
+    hw = int(cfg["CLIM_HALF_WINDOW_DAYS"])
+    era5_fetch = era5_fetch or s1.sync_era5_land_point
+    end = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
+    vals, qc_rows, current, errors = [], [], {}, []
+
+    def products_from(era: pd.DataFrame, swi: Optional[pd.DataFrame]) -> Dict[str, Any]:
+        e = era.set_index(pd.to_datetime(era["time"]).dt.floor("D")).sort_index()
+        prods = {"ERA5L_SM_RZ": (rootzone(e[~e.index.duplicated(keep="last")]), "ERA5 cell")}
+        if swi is not None and len(swi):
+            sw = swi.set_index(pd.to_datetime(swi["date"]).dt.floor("D")).sort_index()
+            for t in (int(cfg["SWI_T"]),) + tuple(int(x) for x in cfg.get("SWI_T_SENS", ())):
+                if f"swi{t:03d}" in sw:
+                    prods[f"SWI_v4_T{t:03d}"] = (sw[f"swi{t:03d}"].astype(float), "SWI 0.1° cell")
+        return prods
+
+    # 1. Condom: ISMN 20–30 cm po A4, ERA5 i SWI piksela winnicy (stacja 136 m od winnicy, ta sama komórka 0,1°)
+    try:
+        v20, v30 = s7.a4_variants(0.20, overrides), s7.a4_variants(0.30, overrides)
+        a4 = s7.a4_flag_report(v20, v30)
+        a4.to_csv(os.path.join(out, "a4_flags.csv"), index=False)
+        prods = products_from(pd.read_csv(_era5_csv(cfg), parse_dates=["time"]), s9.read_swi(cfg))
+        for var in ("W1", "W2", "W3", "W1_05WP", "W1_015"):
+            rz = pd.concat([v20[var]["sm"], v30[var]["sm"]], axis=1).dropna().mean(axis=1)
+            vals.append(s10.validate_layer(rz, prods, (s7cfg["START_DATE"], s7cfg["END_DATE"]), s7.site_id(s7cfg),
+                                           f"ISMN_20_30cm_A4{var}", s7cfg, hw))
+    except Exception as e:
+        a4 = None
+        errors.append(f"Condom: {type(e).__name__}: {e}")
+    # 2. Stacje ICOS
+    for site in cfg.get("REF_SITES", ()):
+        try:
+            sc = s10.REF_SITES[site]
+            daily, info = s10.ingest_icos_site(site, os.path.join(cfg["REF_DIR"], site), session=icos_session)
+            era = era5_fetch(sc["lat"], sc["lon"], sc["fetch_from"], end, os.path.join(cfg["ERA5_DIR"], f"ref_{site}"))
+            raw = s1.sync_swi_point(cfg["SECRETS_DIR"], sc["lat"], sc["lon"], cfg["SWI_PRODUCT"], end,
+                                    os.path.join(cfg["SWI_DIR"], f"ref_{site}"), start=sc["fetch_from"],
+                                    session=cdse_session)
+            swi, _ = s1.clean_swi(raw)
+            v, cur = s10.validate_icos_site(site, daily, era, swi, cfg, s7cfg)
+            vals.append(v)
+            current[site] = cur
+            for lvl, q in info["qc"].items():
+                qc_rows.append({"site": site, "level": lvl, "depth_m": sc["depths"][int(lvl.split("_")[1])], **q,
+                                "nrt_days": info["nrt_days"], "first": info["first"], "last": info["last"]})
+        except Exception as e:
+            errors.append(f"{site}: {type(e).__name__}: {e}")
+    val = pd.concat([v for v in vals if len(v)], ignore_index=True) if any(len(v) for v in vals) else pd.DataFrame()
+    val.to_csv(os.path.join(out, "validation_reference.csv"), index=False)
+    pd.DataFrame(qc_rows).to_csv(os.path.join(out, "validation_reference_qc.csv"), index=False)
+    with open(os.path.join(out, "reference_current.json"), "w", encoding="utf-8") as f:
+        json.dump({"current": current, "errors": errors}, f, indent=1, ensure_ascii=False, default=str)
+    msg = []
+    for (site, ref), g in (val.groupby(["site_id", "reference"]) if len(val) else []):
+        seg = s10.MAIN_SEGMENT.get(site, "anomaly_clim")
+        r = g[(g["segment"] == seg) & (g["metric"] == "pearson_r")]
+        if len(r) and (ref.endswith("A4W1") or (ref.startswith("ICOS") and not ref.endswith("0_100cm"))):
+            msg.append(f"{site} ({seg}): " + ", ".join(f"{p} R = {x:.2f}" for p, x in zip(r["product"], r["value"])
+                                                      if p in ("ERA5L_SM_RZ", f"SWI_v4_T{int(cfg['SWI_T']):03d}")))
+    msg += [f"BŁĄD {x}" for x in errors]
+    return {"message": "; ".join(msg) or "brak wyników", "registry": {"gwl_validation_metrics": val} if len(val) else {}}
+
+
 def task_weather(rt: Dict[str, Any], cfg: Dict[str, Any], fetch: bool = True) -> Dict[str, Any]:
     """
     Przymrozki i upały dla winnicy (ERA5-Land) + walidacja ERA5 (Tmin, Tmax, opad, SPI) na najbliższych stacjach
@@ -1051,6 +1135,21 @@ def task_summary(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
                     + "\n\nNa ile ufać:\n" + "\n".join(f"- {x}" for x in trust_pl))
     except Exception as e:
         water_md = f"(niedostępna: {type(e).__name__}: {e})"
+    ref_md = "(nie uruchomiono task_ref_validate)"
+    rpath = os.path.join(cfg["OUTPUT_DIR"], "validation_reference.csv")
+    if os.path.exists(rpath):
+        try:
+            import step_10_reference as s10
+            rv = pd.read_csv(rpath) if os.path.getsize(rpath) > 1 else pd.DataFrame()
+            qp, ap = os.path.join(cfg["OUTPUT_DIR"], "validation_reference_qc.csv"), os.path.join(cfg["OUTPUT_DIR"], "a4_flags.csv")
+            cj = os.path.join(cfg["OUTPUT_DIR"], "reference_current.json")
+            cur_js = json.load(open(cj, encoding="utf-8")) if os.path.exists(cj) else {}
+            ref_md = s10.ref_summary_md(rv, pd.read_csv(qp) if os.path.exists(qp) and os.path.getsize(qp) > 1 else None,
+                                        cur_js.get("current"), pd.read_csv(ap) if os.path.exists(ap) else None)
+            if cur_js.get("errors"):
+                ref_md += "\n\nBłędy: " + "; ".join(cur_js["errors"])
+        except Exception as e:
+            ref_md = f"(niedostępna: {type(e).__name__}: {e})"
     md_txt = f"""# AgriWatch — raport z uruchomienia {summary['generated_utc']}
 
 Commit `{summary['git_commit']}` · urządzenie: {gpu} · sen2sr {summary['versions']['sen2sr']} · torch {summary['versions']['torch']}
@@ -1075,6 +1174,9 @@ Commit `{summary['git_commit']}` · urządzenie: {gpu} · sen2sr {summary['versi
 
 ## Walidacja
 {table(val.round(3)) if len(val) else "(brak)"}
+
+## Walidacja na stacjach referencyjnych (W2 + REF)
+{ref_md}
 
 ## Pogoda: stacje Météo-France i walidacja ERA5-Land
 Stacje:
@@ -1129,7 +1231,8 @@ def _selftest(out_dir: str) -> None:
                               "OUTPUT_DIR": os.path.join(out_dir, "out"), "SR_DIR": os.path.join(out_dir, "sr"),
                               "BOOTSTRAP_N": 200, "USE_SR": True, "SR_MAX_SCENES_PER_RUN": None,
                               "SR_MODEL_DIR": os.path.join(out_dir, "model"), "MF_DIR": os.path.join(out_dir, "mf"),
-                              "SWI_DIR": os.path.join(out_dir, "swi"), "SECRETS_DIR": os.path.join(out_dir, "secrets")})
+                              "SWI_DIR": os.path.join(out_dir, "swi"), "SECRETS_DIR": os.path.join(out_dir, "secrets"),
+                              "REF_DIR": os.path.join(out_dir, "ref")})
     rng = np.random.default_rng(1)
 
     # Syntetyczne ERA5-Land 1991-2024: cykl roczny + szum AR(1); opad gamma
@@ -1187,6 +1290,51 @@ def _selftest(out_dir: str) -> None:
                 bands = {f"B{k}": {"stats": {"mean": v, "sampleCount": 1, "noDataCount": 0}} for k in range(8)}
                 rows.append({"interval": {"from": f"{d:%Y-%m-%d}T00:00:00Z"}, "outputs": {"swi": {"bands": bands}}})
             return self.R({"data": rows})
+
+    # Udawany portal ICOS (W2 + REF): poziomy SWC (%) z gleby syntetycznego ERA5 + szum, co pół godziny 2022–2024;
+    # FR-Lus: L2 do 30 XI 2024, NRT od 1 XI 2024 (po końcu L2 wchodzi tylko grudzień)
+    import io as io_
+    import zipfile as zipfile_
+    hh_t = pd.date_range("2022-01-01 00:30", "2025-01-01 00:00", freq="30min")
+    rng_ic = np.random.default_rng(11)
+    rz_hh = rz_syn.reindex((hh_t - pd.Timedelta(minutes=15)).floor("D")).to_numpy() * 100
+
+    def icos_zip(n_levels, t0, t1):
+        sel = (hh_t >= pd.Timestamp(t0)) & (hh_t <= pd.Timestamp(t1))
+        d = pd.DataFrame({"TIMESTAMP_START": (hh_t[sel] - pd.Timedelta(minutes=30)).strftime("%Y%m%d%H%M"),
+                          "TIMESTAMP_END": hh_t[sel].strftime("%Y%m%d%H%M")})
+        for k in range(1, n_levels + 1):
+            d[f"SWC_{k}"] = (rz_hh[sel] + k * 0.5 + rng_ic.normal(0, 0.3, int(sel.sum()))).round(2)
+        b = io_.BytesIO()
+        with zipfile_.ZipFile(b, "w") as z:
+            z.writestr("meteo.csv", d.to_csv(index=False))
+        return b.getvalue()
+
+    icos_files = {"FR-Aur_L2": icos_zip(5, "2022-01-01", "2025-01-01"),
+                  "FR-Lus_L2": icos_zip(6, "2022-01-01", "2024-12-01 00:00"),
+                  "FR-Lus_NRT": icos_zip(6, "2024-11-01", "2025-01-01")}
+
+    class FakeIcos:
+        class R:
+            def __init__(self, js=None, content=b""):
+                self.status_code, self._js, self.content = 200, js, content
+
+            def json(self):
+                return self._js
+
+        def post(self, url, data=None, headers=None, timeout=None):
+            site = "FR-Aur" if "ES_FR-Aur" in data["query"] else "FR-Lus"
+            kind = "NRT" if '"ETC NRT Meteo"' in data["query"] else "L2"
+            oid = f"{site}_{kind}"
+            if oid not in icos_files:
+                return self.R({"results": {"bindings": []}})
+            return self.R({"results": {"bindings": [{"d": {"value": f"https://meta.icos-cp.eu/objects/{oid}"},
+                                                     "fn": {"value": f"{oid}.zip"},
+                                                     "start": {"value": "2022-01-01T00:00:00Z"},
+                                                     "end": {"value": "2025-01-01T00:00:00Z"}}]}})
+
+        def get(self, url, cookies=None, timeout=None):
+            return self.R(content=icos_files[url.rsplit("/", 1)[-1]])
 
     # Syntetyczne sceny S-2 (12 pasm jak w step_01) na siatce obejmującej winnicę i stację
     parcels = gpd.read_file(cfg["PARCELS_PATH"]).to_crs(cfg["EPSG"])
@@ -1264,7 +1412,11 @@ def _selftest(out_dir: str) -> None:
         for name, fn in (("ingest_swi", lambda r, c: task_ingest_swi(r, c, session=FakeCdse())),
                          ("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
                          ("validate", task_validate),
-                         ("weather", lambda r, c: task_weather(r, c, fetch=False)), ("bulletin", task_bulletin),
+                         ("weather", lambda r, c: task_weather(r, c, fetch=False)),
+                         ("ref_validate", lambda r, c: task_ref_validate(r, c, cdse_session=FakeCdse(),
+                                                                         icos_session=FakeIcos(),
+                                                                         era5_fetch=lambda *a, **k: era5)),
+                         ("bulletin", task_bulletin),
                          ("dashboard", lambda r, c: task_dashboard(r, c, forecast=False)),
                          ("summary", task_summary)):
             run_task(rt, name, fn, rt, cfg, raise_errors=True)
@@ -1306,6 +1458,8 @@ def _selftest(out_dir: str) -> None:
                         cfg["MAIN_SITE"])
     s9._selftest_water(cfg)
     s1._selftest_swi()
+    import step_10_reference as s10
+    s10._selftest()
     assert "Woda w glebie — okolica winnicy" in dash and dash.index("Woda w glebie") < dash.index("Kondycja winnicy")
     with open(os.path.join(cfg["OUTPUT_DIR"], "agriwatch_latest.json"), encoding="utf-8") as f:
         wjs = json.load(f)["water_card"]
@@ -1317,6 +1471,26 @@ def _selftest(out_dir: str) -> None:
     assert wjs["satellite"]["T"] == 15 and wjs["satellite"]["agreement"]["years"] == [2007, 2024], wjs["satellite"]
     assert "Satelita (radar ASCAT" in dash and "Satelita a model: ta sama klasa" in dash, "brak wiersza satelity"
     assert "Satellite (ASCAT radar" in bmd and "Satellite vs model" in bmd
+    # W2 + REF: Condom po A4 (warianty), FR-Aur i FR-Lus z udawanego portalu ICOS; raport i kontrola bieżąca
+    rv = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_reference.csv"))
+    assert {"SMOSMANIA_Condom", "FR-Aur", "FR-Lus"} <= set(rv["site_id"]), set(rv["site_id"])
+    assert {f"ISMN_20_30cm_A4{v}" for v in ("W1", "W2", "W3", "W1_05WP", "W1_015")} <= set(rv["reference"])
+    assert (rv["segment"] == "anomaly_clim_from_2020-10-19").any() and "ICOS_FR-Lus_0_100cm" in set(rv["reference"])
+    lus = rv[(rv["reference"] == "ICOS_FR-Lus_20_30cm") & (rv["segment"] == "anomaly_35d") & (rv["metric"] == "pearson_r")]
+    assert set(lus["product"]) == {"ERA5L_SM_RZ", "SWI_v4_T015", "SWI_v4_T010", "SWI_v4_T040"}, lus
+    assert lus.set_index("product").loc["ERA5L_SM_RZ", "value"] > 0.5, lus
+    rcur = json.load(open(os.path.join(cfg["OUTPUT_DIR"], "reference_current.json"), encoding="utf-8"))
+    assert not rcur["errors"] and rcur["current"]["FR-Lus"]["products"]["ERA5L_SM_RZ"]["class"], rcur
+    assert rcur["current"]["FR-Aur"] == {}, "kontrola bieżąca tylko na stacji z danymi bieżącymi (protokół §6)"
+    rqc = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_reference_qc.csv"))
+    assert int(rqc[rqc["site"] == "FR-Lus"]["nrt_days"].iat[0]) == 31, rqc
+    smd = open(os.path.join(cfg["OUTPUT_DIR"], "run_summary.md"), encoding="utf-8").read()
+    assert "Walidacja na stacjach referencyjnych" in smd and "ICOS_FR-Lus_20_30cm" in smd and "A4 (Condom" in smd
+    tab = smd[smd.index("## Walidacja na stacjach referencyjnych"):smd.index("## Pogoda")]
+    assert tab.index("ISMN_20_30cm_A4W1 |") < tab.index("ISMN_20_30cm_A4W2") < tab.index("ICOS_FR-Aur_30cm") \
+        < tab.index("ICOS_FR-Aur_0_100cm") < tab.index("ICOS_FR-Lus_20_30cm"), "kolejność: warstwy główne przed wrażliwością"
+    print(f"[OK] W2 + REF: {len(rv)} metryk dla Condom (A4 W1/W2/W3 i wrażliwość), FR-Aur i FR-Lus; "
+          f"FR-Lus ERA5 R anomalii 35 d = {lus.set_index('product').loc['ERA5L_SM_RZ', 'value']:.2f} (dane syntetyczne)")
     print(f"[OK] SWI (W3a): wiersz satelity — {wjs['satellite']['class']}, zgodność z modelem "
           f"{100 * wjs['satellite']['agreement']['po']:.0f}% dni 2007–2024, kappa {wjs['satellite']['agreement']['kappa']:.2f}")
     wv = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_weather.csv"))
