@@ -402,6 +402,8 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "WATER_ROUND_MM": 5,                  # niedobór w mm zaokrąglany do 5 mm (bez udawanej dokładności ERA5)
     "WATER_PRECIP_DAYS": (30, 90),        # opad z ostatnich 30 i 90 dni jako % normy
     "WATER_P_UNDER_REVIEW": True,         # prawdopodobieństwo z ISMN w rewizji do czasu A4 (Plan v9 W2)
+    # Klucze (D-074): tylko z folderu na Dysku obok projektu (MyDrive/GeoWorldLook/secrets), np. cdse.env
+    "SECRETS_DIR": "../secrets",
     # Progi statusu (EDO CDI)
     "THR_SPI1": -2.0, "THR_SPI3": -1.0, "THR_SMA": -1.0, "THR_VEG": -1.0,
     "STATUS_START": "2016-01-01",
@@ -440,7 +442,7 @@ MONITOR_CONFIG: Dict[str, Any] = {
 }
 
 _PATH_KEYS = ("PARCELS_PATH", "AOI_PATH", "ISMN_DIR", "S2_DIR", "S2_MANIFEST", "ERA5_DIR", "SR_MODEL_DIR", "MF_DIR",
-              "SR_DIR", "OUTPUT_DIR")
+              "SR_DIR", "OUTPUT_DIR", "SECRETS_DIR")
 
 
 def monitor_config(rt: Dict[str, Any], overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -449,7 +451,7 @@ def monitor_config(rt: Dict[str, Any], overrides: Optional[Dict[str, Any]] = Non
     cfg.update(overrides or {})
     for k in _PATH_KEYS:
         if not os.path.isabs(cfg[k]):
-            cfg[k] = os.path.join(rt["PROJECT_DIR"], cfg[k])
+            cfg[k] = os.path.normpath(os.path.join(rt["PROJECT_DIR"], cfg[k]))
     cfg["PROJECT_DIR"] = rt["PROJECT_DIR"]
     return cfg
 
@@ -483,6 +485,25 @@ def task_ingest_s2(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     after = set(glob.glob(os.path.join(cfg["S2_DIR"], "S2_L2A_*.tif")))
     new = len(after - before)
     return {"skipped": new == 0, "message": f"{len(after)} scen na Dysku, {new} nowych"}
+
+
+def task_probe_swi(rt: Dict[str, Any], cfg: Dict[str, Any], days: int = 31) -> Dict[str, Any]:
+    """
+    Sonda dostępu do satelitarnego SWI 1 km (Plan v9 W3a, D-078): klucze z SECRETS_DIR (tylko nazwy), logowanie
+    do Copernicus Data Space, kolekcje SWI w katalogu, ostatni miesiąc dla piksela winnicy. Wynik w swi_probe.json
+    (bez kluczy). Bez analizy — pełne pobieranie i karta po odczytaniu wyniku sondy.
+    """
+    import step_01_ingest as s1
+    lon, lat = _main_site_lonlat(cfg)
+    res = s1.probe_swi(cfg["SECRETS_DIR"], lat, lon, days=days)
+    os.makedirs(cfg["OUTPUT_DIR"], exist_ok=True)
+    with open(os.path.join(cfg["OUTPUT_DIR"], "swi_probe.json"), "w", encoding="utf-8") as f:
+        json.dump(res, f, indent=1, ensure_ascii=False, default=str)
+    st = res.get("stats")
+    msg = f"logowanie: {res.get('login')}; " + (
+        f"SWI: {st['days_with_data']} dni z danymi {st['first']}…{st['last']}, wartości {st['min']}–{st['max']}"
+        if isinstance(st, dict) else f"SWI: {st}")
+    return {"message": msg, "probe": res}
 
 
 def task_ingest_era5(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -1222,6 +1243,7 @@ def _selftest(out_dir: str) -> None:
     s9._selftest_panels(veg, pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "status_dekads.csv")), era5, cfg,
                         cfg["MAIN_SITE"])
     s9._selftest_water(cfg)
+    s1._selftest_swi()
     assert "Woda w glebie — okolica winnicy" in dash and dash.index("Woda w glebie") < dash.index("Kondycja winnicy")
     with open(os.path.join(cfg["OUTPUT_DIR"], "agriwatch_latest.json"), encoding="utf-8") as f:
         wjs = json.load(f)["water_card"]

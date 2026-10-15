@@ -45,6 +45,7 @@ Zależności między modułami: `step_05` importuje pozostałe moduły leniwie (
 |---|---|---|
 | `task_ingest_s2` | AOI + bufor 320 m, sezon IV–X, ≤ 40% chmur nad AOI | `data/01_Raw_Sentinel2/S2_L2A_*.tif` |
 | `task_ingest_era5` | centroid winnicy, 1991 → dziś | `data/02_ERA5_Land/era5_land_daily.csv` |
+| `task_probe_swi` | klucze z `SECRETS_DIR` (`cdse.env`), piksel winnicy, ostatni miesiąc | `swi_probe.json` — sonda dostępu do CLMS SWI 1 km (Plan v9 W3a); klucze nie trafiają do wyników |
 | `task_scene_stats` | nowe sceny (brak w `gwl_observations`), od najnowszej | statystyki obiektów 10 m i 2,5 m (tylko wskaźniki, których pasma przeszły H-SR0/H-SR1); QC SR jako `product = SR_QC` z wersją kontroli w `calib_id`; limit `SR_MAX_SCENES_PER_RUN` na uruchomienie; pokrycie SR w komunikacie (`sr_coverage`); zapis co 25 scen (wznawianie po przerwanej sesji); wycinki NDVI działki dla mapy |
 | `task_anomalies` | ERA5, obserwacje roślinności | `gwl_anomalies`, `gwl_status` (z `p_soil_drought`), `era5_daily_anomalies.csv`, `veg_anomalies.csv` (NDVI, NDRE, NDMI, CRSWIR; kolumny `track`, `ref_mode`), `status_dekads.csv` |
 | `task_validate` | anomalie i status | `gwl_validation_metrics`, `validation_anomalies.csv` (R anomalii vs ISMN 5 cm i 20–30 cm z CI, POD/FAR suchych dekad) |

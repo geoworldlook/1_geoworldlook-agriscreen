@@ -6,11 +6,16 @@ import json
 import os
 
 CELLS = [
-    ("md", """# AgriWatch Monitor — anomalie suszy dla winnicy (Condom, Gers)
-Otwieraj z GitHub (Plik → Otwórz → GitHub). Środowisko z **GPU** (dla SEN2SR). Potem `Uruchom wszystko`.
+    ("md", """# AgriWatch Monitor — woda w winnicy (Condom, Gers)
+Notatnik zarządczy całego potoku. Otwieraj z GitHub (Plik → Otwórz → GitHub), potem `Uruchom wszystko`.
+GPU potrzebne tylko przy nowych scenach (SEN2SR).
 
-Łańcuch: Sentinel-2 (rastry, jak w v1) → SEN2SR 2,5 m z kontrolą → indeksy winnicy → anomalie (ERA5-Land SMA, SPI, NDVI)
-→ status dekadowy wg logiki EDO CDI → walidacja na ISMN Condom → biuletyn i **dashboard winnicy**.
+Łańcuch: Sentinel-2 i ERA5-Land → (sonda satelitarnego SWI 1 km) → SEN2SR 2,5 m z kontrolą → indeksy winnicy →
+anomalie i status dekadowy (logika EDO CDI) → walidacja na ISMN Condom → pogoda (Météo-France) → biuletyn →
+**dashboard z kartą „Woda w glebie”** → raport z uruchomienia.
+
+Plan: `docs/plans/Plan_v9_woda_w_winnicy.md` (W1 karta wody i W1b „Na ile ufać” — gotowe; W3a SWI 1 km — sonda).
+Klucze: tylko z `MyDrive/GeoWorldLook/secrets/` (np. `cdse.env`); notatnik nie wypisuje ich treści.
 Wyniki: `MyDrive/GeoWorldLook/agriwatch/data/05_Final_Outputs/agriwatch/` i tabele `data/registry/gwl_*.csv`."""),
     ("md", "## 1. Dysk Google i kod z GitHub"),
     ("code", """import os, sys
@@ -49,7 +54,7 @@ except Exception as e:
 print('Projekt:', PROJECT_DIR)"""),
     ("md", "## 2. Środowisko: pakiety, GEE, rejestr, konfiguracja"),
     ("code", """from step_05_colab_run import (setup_runtime, monitor_config, run_task, run_history, registry_summary,
-                               task_ingest_s2, task_ingest_era5, task_scene_stats, task_anomalies,
+                               task_ingest_s2, task_ingest_era5, task_probe_swi, task_scene_stats, task_anomalies,
                                task_validate, task_weather, task_bulletin, task_dashboard, task_summary)
 from step_06_dashboard import show_dashboard
 rt = setup_runtime(PROJECT_DIR, gee_project='ee-geoworldlook', pull=False)
@@ -57,6 +62,16 @@ cfg = monitor_config(rt)   # zmiany: monitor_config(rt, {'VINEYARDS': {'VINEYARD
     ("md", "## 3. Dane: rastry Sentinel-2 (przyrostowo) i ERA5-Land 1991 → dziś"),
     ("code", """run_task(rt, 'ingest_s2', task_ingest_s2, rt, cfg)
 run_task(rt, 'ingest_era5', task_ingest_era5, rt, cfg)"""),
+    ("md", """## 3b. Satelitarny SWI 1 km — sonda dostępu (Plan v9 W3a)
+Copernicus Land Soil Water Index 1 km (radar Sentinel-1 + ASCAT) przez Copernicus Data Space. Sonda sprawdza tylko
+dostęp: klucze w `secrets/` (nazwy pól, bez wartości), logowanie, kolekcję SWI w katalogu i ostatni miesiąc dla piksela
+winnicy. Bez analizy. **Prześlij wynik tej komórki** — na jego podstawie powstaje pełne pobieranie i wiersz na karcie.
+Metoda: `docs/evidence/W3a_SWI_1km_satelita.md`."""),
+    ("code", """import json
+RUN_SWI_PROBE = True          # po zakończeniu W3a sonda zostanie zastąpiona pobieraniem SWI
+if RUN_SWI_PROBE:
+    res = run_task(rt, 'probe_swi', task_probe_swi, rt, cfg)
+    print(json.dumps((res or {}).get('probe'), indent=1, ensure_ascii=False, default=str))"""),
     ("md", "## 4. Indeksy winnicy i stacji: 10 m oraz SEN2SR 2,5 m (kontrola H-SR0/H-SR1, bez zastępstwa interpolacją)"),
     ("code", "run_task(rt, 'scene_stats', task_scene_stats, rt, cfg)"),
     ("md", """## 5. Anomalie, status, walidacja, przymrozki i upały, biuletyn
@@ -68,7 +83,9 @@ run_task(rt, 'validate', task_validate, rt, cfg)
 run_task(rt, 'weather', task_weather, rt, cfg)
 run_task(rt, 'bulletin', task_bulletin, rt, cfg)"""),
     ("md", """## 6. Dashboard winnicy
-Mapa NDVI na zdjęciu satelitarnym (wybór daty), status, ryzyko suszy, przyczyny, pogoda i prognoza, wiarygodność.
+Od góry: **karta „Woda w glebie”** (kategoria suszy, niedobór, miejsce wśród lat, od kiedy, opad, prawdopodobieństwo,
+„Na ile ufać”), krzywa sezonu, pogoda, prognoza, przymrozki i upały; niżej „Roślinność działki (informacyjnie)” (mapa
+NDVI, kondycja) i „Szczegóły” (status EDO, wiarygodność, matryca sygnałów, ostatnie lata).
 Plik: `data/05_Final_Outputs/agriwatch/dashboard.html` (można otworzyć w przeglądarce z Dysku)."""),
     ("code", """run_task(rt, 'dashboard', task_dashboard, rt, cfg)
 p = os.path.join(cfg['OUTPUT_DIR'], 'dashboard.html')
@@ -77,7 +94,8 @@ if os.path.exists(p):
 else:
     print('Dashboard nie powstał — sprawdź komunikat zadania powyżej.')"""),
     ("md", """## 7. Raport z uruchomienia (do analizy)
-`run_summary.md` — wersje, konfiguracja, pokrycie danych, kontrola SR, status per rok, walidacja, błędy.
+`run_summary.md` — wersje, konfiguracja, pokrycie danych, kontrola SR, **karta „Woda w glebie” z „Na ile ufać”**,
+status per rok, walidacja, pogoda, błędy.
 **Po każdym większym uruchomieniu prześlij ten plik** (albo wklej jego treść) — na nim opieramy wnioski."""),
     ("code", """run_task(rt, 'summary', task_summary, rt, cfg)
 print(open(os.path.join(cfg['OUTPUT_DIR'], 'run_summary.md'), encoding='utf-8').read())"""),

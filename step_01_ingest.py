@@ -27,6 +27,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import rasterio
 
 logger = logging.getLogger("AgriWatch_Ingest")
@@ -416,6 +417,215 @@ def sync_era5_land_point(
     out = pd.concat(frames, ignore_index=True).drop_duplicates("time").sort_values("time").reset_index(drop=True)
     logger.info(f"ERA5-Land: {len(out)} dni, {out['time'].min():%Y-%m-%d} -> {out['time'].max():%Y-%m-%d}")
     return out
+
+
+# ==============================================================================
+# IV-b. KLUCZE Z DYSKU I SATELITARNY SOIL WATER INDEX 1 km (CLMS) — SONDA DOSTĘPU (Plan v9 W3a)
+# ==============================================================================
+# Klucze tylko z folderu SECRETS_DIR na Dysku (MyDrive/GeoWorldLook/secrets), plik KEY=VALUE `cdse.env`.
+# Treść kluczy nigdy nie trafia do logów, rejestru ani raportów (D-074): secrets_status podaje tylko nazwy plików
+# i nazwy pól. Sonda sprawdza dostęp do SWI 1 km przez Copernicus Data Space (Sentinel Hub Statistical API, D-078)
+# na jednym miesiącu dla piksela winnicy — bez analizy; pełne pobieranie powstaje po wyniku sondy.
+# Metoda: docs/evidence/W3a_SWI_1km_satelita.md. Adresy jak w ETL strony GeoWorldLook (scripts/backfill_copernicus.py).
+
+CDSE_TOKEN_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+CDSE_STATS_URL = "https://sh.dataspace.copernicus.eu/api/v1/statistics"
+CDSE_CATALOG_URL = "https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/collections"
+SWI_COLLECTION = "byoc-bd02588b-7236-4b1e-9480-aeae7dce3c7a"   # z legacy/step_01_ingest_v1.py — potwierdza sonda
+SWI_BANDS = ("SWI002", "SWI005", "SWI010", "SWI015", "SWI020", "SWI040", "SWI060", "SWI100")
+SWI_SCALE = 0.5                                                 # pasmo × 0,5 = % nasycenia (legacy) — potwierdza sonda
+
+
+def read_secret_env(secrets_dir: str, filename: str = "cdse.env") -> Dict[str, str]:
+    """Plik KEY=VALUE z folderu kluczy (komentarze #, cudzysłowy zdejmowane). Zwraca słownik — nie wypisywać."""
+    path = os.path.join(secrets_dir, filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Brak pliku z kluczami: {path}")
+    out: Dict[str, str] = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def secrets_status(secrets_dir: str) -> Dict[str, Any]:
+    """Co jest w folderze kluczy: nazwy plików i — dla plików .env — nazwy pól. Bez wartości (bezpieczne do wypisania)."""
+    if not os.path.isdir(secrets_dir):
+        return {"folder": secrets_dir, "exists": False}
+    files = sorted(os.listdir(secrets_dir))
+    fields = {}
+    for name in files:
+        if name.endswith(".env"):
+            try:
+                fields[name] = sorted(read_secret_env(secrets_dir, name))
+            except Exception as e:
+                fields[name] = f"nieczytelny ({type(e).__name__})"
+    return {"folder": secrets_dir, "exists": True, "files": files, "env_fields": fields}
+
+
+def cdse_token(secrets_dir: str, session: Any = None, timeout: int = 30) -> str:
+    """Token OAuth2 Copernicus Data Space (client credentials) z `cdse.env` (CDSE_CLIENT_ID/SECRET lub
+    COPERNICUS_CLIENT_ID/SECRET jak w ETL strony). Błąd podaje tylko kod HTTP i kod błędu serwera."""
+    import requests
+    s = session or requests
+    env = read_secret_env(secrets_dir)
+    cid = env.get("CDSE_CLIENT_ID") or env.get("COPERNICUS_CLIENT_ID")
+    sec = env.get("CDSE_CLIENT_SECRET") or env.get("COPERNICUS_CLIENT_SECRET")
+    if not (cid and sec):
+        raise ValueError("W cdse.env brakuje CDSE_CLIENT_ID lub CDSE_CLIENT_SECRET")
+    r = s.post(CDSE_TOKEN_URL, data={"grant_type": "client_credentials", "client_id": cid, "client_secret": sec},
+               timeout=timeout)
+    if r.status_code != 200:
+        try:
+            code = r.json().get("error", "")
+        except Exception:
+            code = ""
+        raise RuntimeError(f"CDSE: logowanie nieudane (HTTP {r.status_code} {code})")
+    return r.json()["access_token"]
+
+
+def _swi_evalscript(bands: Tuple[str, ...] = SWI_BANDS, scale: float = SWI_SCALE) -> str:
+    vals = ", ".join(f"s.{b} * {scale}" for b in bands)
+    return ("//VERSION=3\nfunction setup() {\n  return {input: [{bands: [" + ", ".join(f'"{b}"' for b in bands)
+            + ', "dataMask"]}],\n          output: [{id: "swi", bands: ' + str(len(bands))
+            + ', sampleType: "FLOAT32"}, {id: "dataMask", bands: 1}]};\n}\n'
+            "function evaluatePixel(s) {\n  return {swi: [" + vals + "], dataMask: [s.dataMask]};\n}\n")
+
+
+def parse_swi_stats(js: Dict[str, Any], bands: Tuple[str, ...] = SWI_BANDS) -> "pd.DataFrame":
+    """Odpowiedź Statistical API -> dzienna tabela: date, swi002…swi100 (średnia w obszarze), n_valid."""
+    import pandas as pd
+    rows = []
+    for entry in js.get("data", []):
+        out = entry.get("outputs", {}).get("swi", {}).get("bands", {})
+        if not out:
+            continue
+        row = {"date": pd.Timestamp(entry["interval"]["from"][:10])}
+        n_valid = None
+        for i, b in enumerate(bands):
+            st = out.get(f"B{i}", {}).get("stats", {})
+            row[b.lower()] = st.get("mean", np.nan) if st.get("sampleCount", 0) > st.get("noDataCount", 0) else np.nan
+            if n_valid is None and st:
+                n_valid = int(st.get("sampleCount", 0) - st.get("noDataCount", 0))
+        row["n_valid"] = n_valid if n_valid is not None else 0
+        rows.append(row)
+    cols = ["date"] + [b.lower() for b in bands] + ["n_valid"]
+    return pd.DataFrame(rows, columns=cols).sort_values("date").reset_index(drop=True) if rows else pd.DataFrame(columns=cols)
+
+
+def fetch_swi_point(token: str, lat: float, lon: float, start: str, end: str, half_deg: float = 0.0045,
+                    collection: str = SWI_COLLECTION, session: Any = None, timeout: int = 120) -> "pd.DataFrame":
+    """Dzienny SWI (8 wartości T) dla piksela ~1 km wokół punktu (bbox ±half_deg w EPSG:4326, 1 × 1 piksel wyjścia)."""
+    import requests
+    s = session or requests
+    payload = {
+        "input": {"bounds": {"bbox": [lon - half_deg, lat - half_deg, lon + half_deg, lat + half_deg],
+                             "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/4326"}},
+                  "data": [{"type": collection}]},
+        "aggregation": {"timeRange": {"from": f"{start}T00:00:00Z", "to": f"{end}T23:59:59Z"},
+                        "aggregationInterval": {"of": "P1D"}, "width": 1, "height": 1,
+                        "evalscript": _swi_evalscript()},
+    }
+    r = s.post(CDSE_STATS_URL, json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
+    if r.status_code != 200:
+        raise RuntimeError(f"CDSE Statistical API: HTTP {r.status_code}: {r.text[:300]}")
+    return parse_swi_stats(r.json())
+
+
+def probe_swi(secrets_dir: str, lat: float, lon: float, days: int = 31, session: Any = None) -> Dict[str, Any]:
+    """
+    Sonda dostępu do SWI 1 km (jednorazowo, bez analizy): klucze w folderze (tylko nazwy), logowanie, kolekcje
+    w katalogu z „swi”/„soil water” w nazwie, dzienny SWI z ostatnich `days` dni dla piksela winnicy (liczba dni,
+    zakres dat, zakres wartości — czy skala 0–100). Każdy etap ma własny wynik; błąd jednego nie ukrywa pozostałych.
+    """
+    import pandas as pd
+    import requests
+    s = session or requests
+    res: Dict[str, Any] = {"secrets": secrets_status(secrets_dir), "collection": SWI_COLLECTION}
+    try:
+        token = cdse_token(secrets_dir, session=s)
+        res["login"] = "ok"
+    except Exception as e:
+        res["login"] = f"błąd: {type(e).__name__}: {e}"
+        return res
+    try:
+        r = s.get(CDSE_CATALOG_URL, headers={"Authorization": f"Bearer {token}"}, timeout=60)
+        cols = r.json().get("collections", []) if r.status_code == 200 else []
+        res["catalog"] = ([{"id": c.get("id"), "title": c.get("title")} for c in cols
+                           if any(k in f"{c.get('id', '')} {c.get('title', '')}".lower()
+                                  for k in ("swi", "soil water", "soil moisture"))]
+                          if r.status_code == 200 else f"HTTP {r.status_code}")
+    except Exception as e:
+        res["catalog"] = f"błąd: {type(e).__name__}: {e}"
+    end = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    start = end - pd.Timedelta(days=days)
+    try:
+        df = fetch_swi_point(token, lat, lon, f"{start:%Y-%m-%d}", f"{end:%Y-%m-%d}", session=s)
+        vals = df[[b.lower() for b in SWI_BANDS]].to_numpy(float) if len(df) else np.array([])
+        fin = vals[np.isfinite(vals)] if vals.size else vals
+        res["stats"] = {"days_with_data": int(df.dropna(subset=["swi020"]).shape[0]) if len(df) else 0,
+                        "first": str(df["date"].min().date()) if len(df) else None,
+                        "last": str(df["date"].max().date()) if len(df) else None,
+                        "min": float(fin.min()) if fin.size else None, "max": float(fin.max()) if fin.size else None,
+                        "scale_0_100": bool(fin.size and fin.min() >= 0 and fin.max() <= 100)}
+        res["sample"] = df.tail(5).round(2).astype({"date": str}).to_dict("records") if len(df) else []
+    except Exception as e:
+        res["stats"] = f"błąd: {type(e).__name__}: {e}"
+    return res
+
+
+def _selftest_swi() -> None:
+    """Klucze z pliku (komentarze, cudzysłowy, nazwy pól bez wartości), parsowanie odpowiedzi Statistical API
+    i przebieg sondy na atrapie sieci (logowanie, katalog, statystyki)."""
+    import tempfile
+    import pandas as pd
+
+    class Resp:
+        def __init__(self, code, js):
+            self.status_code, self._js, self.text = code, js, json.dumps(js)
+
+        def json(self):
+            return self._js
+
+    def stats_js(days):
+        data = []
+        for i, d in enumerate(days):
+            bands = {f"B{k}": {"stats": {"mean": 40.0 + k + i, "sampleCount": 1, "noDataCount": 0}} for k in range(8)}
+            data.append({"interval": {"from": f"{d}T00:00:00Z", "to": f"{d}T23:59:59Z"},
+                         "outputs": {"swi": {"bands": bands}}})
+        return {"data": data}
+
+    class FakeSession:
+        def post(self, url, data=None, json=None, headers=None, timeout=None):
+            if url == CDSE_TOKEN_URL:
+                ok = data["client_id"] == "abc" and data["client_secret"] == "s3cr3t"
+                return Resp(200, {"access_token": "T"}) if ok else Resp(401, {"error": "unauthorized_client"})
+            assert headers["Authorization"] == "Bearer T" and json["input"]["data"][0]["type"] == SWI_COLLECTION
+            return Resp(200, stats_js(["2026-10-01", "2026-10-02"]))
+
+        def get(self, url, headers=None, timeout=None):
+            return Resp(200, {"collections": [{"id": SWI_COLLECTION, "title": "CLMS Soil Water Index 1km"},
+                                              {"id": "sentinel-2-l2a", "title": "Sentinel-2 L2A"}]})
+
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "cdse.env"), "w") as f:
+            f.write('# klucze\nCDSE_CLIENT_ID="abc"\nCDSE_CLIENT_SECRET=s3cr3t\n')
+        st = secrets_status(d)
+        assert st["env_fields"]["cdse.env"] == ["CDSE_CLIENT_ID", "CDSE_CLIENT_SECRET"] and "s3cr3t" not in str(st), st
+        res = probe_swi(d, 43.97, 0.34, session=FakeSession())
+        assert res["login"] == "ok" and res["catalog"] == [{"id": SWI_COLLECTION, "title": "CLMS Soil Water Index 1km"}]
+        assert res["stats"]["days_with_data"] == 2 and res["stats"]["scale_0_100"] and "s3cr3t" not in str(res), res
+        with open(os.path.join(d, "cdse.env"), "w") as f:
+            f.write("CDSE_CLIENT_ID=abc\nCDSE_CLIENT_SECRET=zle\n")
+        bad = probe_swi(d, 43.97, 0.34, session=FakeSession())
+        assert bad["login"].startswith("błąd") and "401" in bad["login"] and "zle" not in str(bad), bad
+    df = parse_swi_stats(stats_js(["2026-10-02", "2026-10-01"]))
+    assert list(df["date"]) == [pd.Timestamp("2026-10-01"), pd.Timestamp("2026-10-02")] and df["swi020"].iat[0] == 45.0
+    print("[OK] Klucze z Dysku i sonda SWI: pola bez wartości, logowanie, katalog, parsowanie odpowiedzi.")
 
 
 # ==============================================================================

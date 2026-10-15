@@ -54,6 +54,10 @@ na prawdziwych danych. W1 nie zmienia trafności — te same liczby inaczej poda
 i w `run_summary.md`; liczby walidacji odczytywane z `validation_weather.csv` i `validation_anomalies.csv`; niedobór,
 miejsce wśród lat i „od kiedy” opisane jako niezwalidowane (D-071). Mapa W3b: NDMI domyślnie (decyzja 2026-10-14).
 
+**Stan 2026-10-15:** W3a — sonda dostępu wdrożona (`step_01.probe_swi`, zadanie `task_probe_swi`, sekcja 3b notatnika;
+klucze z `MyDrive/GeoWorldLook/secrets/cdse.env`, bez wypisywania treści). Czeka na wynik sondy z Colab; potem
+pobieranie całego archiwum i wiersz satelity na karcie.
+
 **Po prototypie (osobna decyzja):** W3 — publikacja karty na GeoWorldLook (Supabase, mapa); W7 — automatyczna
 cotygodniowa aktualizacja (GitHub Actions, ERA5-Land z Copernicus Climate Data Store). To część etapu E Planu v8.
 
