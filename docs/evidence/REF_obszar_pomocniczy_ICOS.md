@@ -1,6 +1,6 @@
 # REF — obszar pomocniczy z pomiarami wilgotności gleby w terenie (notatka metodyczna)
 
-> **Status:** `PROPOSED` (2026-10-15), D-082, do akceptacji. Dane sprawdzone 2026-10-15 w portalu ICOS Carbon Portal
+> **Status:** `APPROVED` 2026-10-15 (D-082). Protokół walidacji: `docs/evidence/W2_REF_protokol_walidacji.md` (D-083). Dane sprawdzone 2026-10-15 w portalu ICOS Carbon Portal
 > (metadane SPARQL i pliki danych). Żadnej analizy wobec AgriScreen jeszcze nie wykonano.
 
 ## Wynik w skrócie
@@ -51,8 +51,8 @@ Licencja danych ICOS: CC BY 4.0 (do potwierdzenia w umowie licencyjnej przy pier
   kierunku zmian; percentyle czujników opisujemy jako orientacyjne.
 - **Łąka to nie winnica.** FR-Lus sprawdza warstwę wody (ERA5, SWI) i metodę anomalii, nie reakcję winorośli.
   Rozplątanie sygnału winnicy (Plan v8, moduły 2–3) zostaje na Condom.
-- **Głębokości poziomów** SWC_1…SWC_6 odczytujemy z metadanych stacji (BADM / plik METEOSENS) przed pierwszym użyciem;
-  dziś ich nie znamy.
+- **Głębokości poziomów** odczytane 2026-10-15 z plików VARINFO w archiwach ICOS: FR-Lus 0,05 / 0,10 / 0,20 / 0,30 /
+  0,60 / 1,00 m; FR-Aur 0,05 / 0,10 / 0,30 / 0,50 / 1,00 m (4 profile; w metadanych FR-Aur zmiana modelu 2020-10-19).
 - **Odległość:** FR-Lus leży poza obszarem Condom, więc nie zastępuje lokalnej walidacji. FR-Aur jest w Gers,
   ale bez danych bieżących.
 

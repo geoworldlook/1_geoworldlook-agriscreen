@@ -27,8 +27,8 @@ miejscach z pomiarami w gruncie: Condom (obszar główny) i obszar pomocniczy (D
   „Na ile ufać”. **Pierwszy przebieg (2026-10-15):** satelita na 14.10 suszej niż w każdym roku 2007–2024 o tej porze,
   zgodnie z modelem; zgodność klas ERA5–SWI 2007–2024: 63% dni [59; 68], kappa 0,44 [0,36; 0,52] (umiarkowana);
   T = 10: 61%, T = 40: 65%. Szczegóły: `docs/evidence/W3a_SWI_1km_satelita.md` §0 pkt 8.
-- Referencja naziemna: ISMN (Condom) niedostępny; zaproponowane FR-Lus i FR-Aur z sieci ICOS
-  (`docs/evidence/REF_obszar_pomocniczy_ICOS.md`, D-082, do akceptacji).
+- Referencja naziemna: ISMN (Condom) niedostępny w sieci (pliki do 2024 r. są na Dysku); FR-Lus i FR-Aur z sieci ICOS
+  zatwierdzone (D-082). W2 + REF w toku: protokół zarejestrowany przed liczeniem (D-083).
 - Słabości, o których piszemy wprost: jedna stacja naziemna z artefaktami czujników (A4), alarm z NDVI bez trafień,
   brak prawdy terenowej o wodzie w samej winnicy, krótkie normy danych satelitarnych.
 
@@ -226,10 +226,14 @@ winorośl/międzyrzędzie (Plan v8, moduł 3), sygnału z odkrytej gleby w SWIR 
   produktu 1 km (zalecenie producenta); 1 km v2 zbierany od 13 VII 2025 bez normy (15 miesięcy historii — norma z lat
   2025–2026 pokazałaby suszę 2026 jako „normę”); T = 15 z literatury; norma 2007–2024;
   `docs/evidence/W3a_SWI_1km_satelita.md` §0.
-- **D-082 (do akceptacji):** obszar pomocniczy FR-Lus (dane bieżące) i referencja historyczna FR-Aur (Gers), sieć ICOS;
-  `docs/evidence/REF_obszar_pomocniczy_ICOS.md`.
-- **Kolejność §0 (do akceptacji):** walidacja (W3a, W2, REF, W1b+) przed nowymi elementami (W3b, W4–W6); zmienia
-  kolejność zatwierdzoną 2026-10-14 (W2 i REF przed W3b).
+- **D-082 (zatwierdzona 2026-10-15):** obszar pomocniczy FR-Lus (dane bieżące) i referencja historyczna FR-Aur (Gers),
+  sieć ICOS; `docs/evidence/REF_obszar_pomocniczy_ICOS.md`.
+- **Kolejność §0 (zatwierdzona 2026-10-15):** walidacja (W3a, W2, REF, W1b+) przed nowymi elementami (W3b, W4–W6).
+- **D-060–D-063 (zatwierdzone 2026-10-15 wraz ze startem W2):** reguły A4 jak w notatce A4 §3–4; SHA-256 tych sekcji
+  przed wdrożeniem: `e69a6f994d25ab6465fbbf0b6ee34fedb8c65623d36045380aec1135c5275120` (zapisany też w Planie v8 przy kroku A4).
+- **D-083 (2026-10-15):** jeden protokół walidacji dla Condom, FR-Aur i FR-Lus, zapisany przed pobraniem danych
+  w punktach stacji i przed policzeniem metryk: `docs/evidence/W2_REF_protokol_walidacji.md`, SHA-256 pliku:
+  `e2a1503a5c9a238f645f5ee8528ea9a4b95258bae627cbce2586ad3d20a48ea8`.
 
 ## 7. Źródła
 

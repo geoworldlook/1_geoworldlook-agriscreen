@@ -1,7 +1,7 @@
 # A4 — kontrola jakości czujników ISMN Condom: utrata kontaktu w glinie (notatka metodyczna)
 
-> **Status:** `PROPOSED` (2026-10-14) — metoda do zatwierdzenia **przed** napisaniem kodu i przed policzeniem
-> jakichkolwiek metryk walidacji (pre-rejestracja, D-063). Plan v7 krok A4, Plan v8 moduł 1.
+> **Status:** `APPROVED` 2026-10-15 (D-060–D-063, start W2) — metoda zatwierdzona **przed** napisaniem kodu i przed
+> policzeniem jakichkolwiek metryk walidacji (pre-rejestracja, D-063). SHA-256 sekcji 3–4: `e69a6f994d25ab6465fbbf0b6ee34fedb8c65623d36045380aec1135c5275120`. Plan v7 krok A4, Plan v8 moduł 1.
 > **Dane:** `data/7_isismn_data/SMOSMANIA/Condom/*.stm` (2016-01-01 → 2024-12-31), tylko rekordy z flagą ISMN `G`.
 > **Odtworzenie liczb:** `python docs/evidence/A4_QC/a4_explore.py` (wynik: `docs/evidence/A4_QC/a4_explore.log`).
 > Skrypt opisuje wyłącznie dane referencyjne; nie liczy metryk produktu.
