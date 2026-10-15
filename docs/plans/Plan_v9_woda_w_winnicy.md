@@ -21,8 +21,10 @@ miejscach z pomiarami w gruncie: Condom (obszar główny) i obszar pomocniczy (D
 
 **Stan (2026-10-15):**
 - Wdrożone: W1 (karta wody), W1b („Na ile ufać”), poprawki po pierwszym przebiegu na prawdziwych danych (D-079).
-- W3a: dostęp do SWI potwierdzony (sondy #1, #2); przed pobraniem zmieniony produkt na SWI 0,1° v4 i T = 15
-  (`docs/evidence/W3a_SWI_1km_satelita.md` §0; D-075–D-077 w rewizji, do akceptacji).
+- W3a (2026-10-15, decyzja: „najnowsze dane, docelowo czas zbliżony do rzeczywistego”): wdrożone pobieranie
+  CLMS SWI 0,1° v4 (nowa generacja 2025, dane do 24 h po pomiarze, jedna wersja od 2007) do wiersza satelity na karcie
+  oraz SWI 1 km v2 (od 13 VII 2025), zbierany bez normy; T = 15, norma 2007–2024, zgodność klas ERA5–SWI (D-080) w
+  „Na ile ufać”. Czeka na pierwszy przebieg w Colab. Szczegóły: `docs/evidence/W3a_SWI_1km_satelita.md` §0.
 - Referencja naziemna: ISMN (Condom) niedostępny; zaproponowane FR-Lus i FR-Aur z sieci ICOS
   (`docs/evidence/REF_obszar_pomocniczy_ICOS.md`, D-082, do akceptacji).
 - Słabości, o których piszemy wprost: jedna stacja naziemna z artefaktami czujników (A4), alarm z NDVI bez trafień,
@@ -216,8 +218,10 @@ winorośl/międzyrzędzie (Plan v8, moduł 3), sygnału z odkrytej gleby w SWIR 
 - **Dopiski zatwierdzone 2026-10-15** (z przeglądu Siora): W3b — „X z N winnic” i zmiana od poprzedniej sceny;
   W1b+ — sekcja „Jak to liczymy”; W4/W7 — alert tylko przy nowym pogorszeniu kategorii, eksport CSV;
   choroby winorośli — kandydat po W6.
-- **D-075, D-076, D-077 (rewizja 2026-10-15, do akceptacji):** SWI 0,1° v4 (jedna wersja 2007–dziś) zamiast łączenia
-  wersji 1 i 2 produktu 1 km (zalecenie producenta), T = 15 z literatury, norma 2007–2024;
+- **D-075, D-076, D-077 (rewizja 2026-10-15, przyjęta 2026-10-15 decyzją „bierzemy najnowsze dane”):** na karcie
+  SWI 0,1° v4 (nowa generacja, jedna wersja 2007–dziś, czas zbliżony do rzeczywistego) zamiast łączenia wersji 1 i 2
+  produktu 1 km (zalecenie producenta); 1 km v2 zbierany od 13 VII 2025 bez normy (15 miesięcy historii — norma z lat
+  2025–2026 pokazałaby suszę 2026 jako „normę”); T = 15 z literatury; norma 2007–2024;
   `docs/evidence/W3a_SWI_1km_satelita.md` §0.
 - **D-082 (do akceptacji):** obszar pomocniczy FR-Lus (dane bieżące) i referencja historyczna FR-Aur (Gers), sieć ICOS;
   `docs/evidence/REF_obszar_pomocniczy_ICOS.md`.

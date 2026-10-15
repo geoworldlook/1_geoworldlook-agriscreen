@@ -35,6 +35,15 @@ Dwie rzeczy zmieniają ustalenia z 2026-10-14, zanim pobraliśmy jakikolwiek sze
    i ze stanem powierzchni SSF oznaczającym zamarznięcie lub topnienie pomijamy; liczbę pominiętych dni raportujemy.
 5. **D-080 (zatwierdzona 2026-10-15):** zgodność kategorii ERA5–SWI mierzymy (odsetek dni z tą samą kategorią,
    kappa Cohena, 2007–2024) i pokazujemy na karcie w „Na ile ufać”; nie zakładamy jej.
+6. **Decyzja z 2026-10-15: „bierzemy najnowsze dane, docelowo czas zbliżony do rzeczywistego”.** SWI 0,1° v4 to
+   nowa generacja produktu (CLMS, 2025: dane do 24 h po pomiarze, „long, consistent time series” od I 2007), więc
+   spełnia ten warunek i daje normę 2007–2024. SWI 1 km v2 (od 13 VII 2025) pobieramy i przechowujemy od teraz, ale
+   **bez percentyla**: 15 miesięcy to najwyżej dwie wartości na dzień roku. Norma z lat 2025–2026 opisywałaby „typowy”
+   stan dwoma latami, z których 2026 jest drugim najsuchszym od 1991 r. (karta W1) — susza wyglądałaby na normę.
+   Do karty 1 km wejdzie, gdy własna historia pozwoli na percentyl (decyzja po walidacji wobec FR-Lus, D-082).
+7. **Wdrożenie:** `step_01.sync_swi_point` (fragmenty kwartalne w cache, ponawianie 401/429/5xx), `clean_swi` (flagi
+   producenta 241–255 → brak), `step_05.task_ingest_swi`, `step_09.water_satellite` i `swi_agreement` (bootstrap po
+   latach), wiersz na karcie i w „Na ile ufać”; konfiguracja `SWI_*` w `MONITOR_CONFIG`.
 
 ## Wynik w skrócie
 
@@ -150,11 +159,11 @@ za 14 IX – 15 X 2026, a filtr katalogu Sentinel Hub nie znalazł kolekcji SWI.
 ## 8. Decyzje
 
 - **D-074 (stosowana):** klucze tylko z `MyDrive/GeoWorldLook/secrets/`, bez wypisywania treści.
-- **D-075 (rewizja 2026-10-15, do akceptacji):** T = 15 (Albergel i in. 2008: Condom 12 dni na 30 cm, mediana SIM
+- **D-075 (rewizja 2026-10-15, przyjęta):** T = 15 (Albergel i in. 2008: Condom 12 dni na 30 cm, mediana SIM
   15 dni); T = 10 i 40 jako wrażliwość; bez dopasowania do ISMN ani ERA5.
-- **D-076 (rewizja 2026-10-15, do akceptacji):** zgodność ERA5–SWI oceniana na wspólnej normie 2007–2024.
-- **D-077 (rewizja 2026-10-15, do akceptacji; zastępuje test ciągłości):** wiersz satelity z SWI 0,1° v4 — jedna wersja
-  produktu 2007–dziś; wersji 1 i 2 produktu 1 km nie łączymy (zalecenie producenta).
+- **D-076 (rewizja 2026-10-15, przyjęta):** zgodność ERA5–SWI oceniana na wspólnej normie 2007–2024.
+- **D-077 (rewizja 2026-10-15, przyjęta; zastępuje test ciągłości):** wiersz satelity z SWI 0,1° v4 — jedna wersja
+  produktu 2007–dziś; wersji 1 i 2 produktu 1 km nie łączymy (zalecenie producenta); 1 km v2 zbierany bez normy.
 - **D-078 (stosowana):** droga A (Copernicus Data Space, Statistical API) z kluczami z `secrets/cdse.env`.
 - **D-080 (zatwierdzona 2026-10-15):** zgodność kategorii ERA5–SWI mierzona i pokazana na karcie.
 
@@ -162,6 +171,9 @@ za 14 IX – 15 X 2026, a filtr katalogu Sentinel Hub nie znalazł kolekcji SWI.
 
 Poziom dostępu: P = pełny tekst, A = abstrakt lub streszczenie, F = fragment z wyszukiwania, W = wiedza własna (do sprawdzenia).
 
+- CLMS: „New Soil Water Index datasets bring deeper insight into global soil moisture” (SWI 0,1° v4: nowa generacja,
+  dane do 24 h po pomiarze, spójny szereg od I 2007):
+  https://land.copernicus.eu/en/news/new-soil-water-index-datasets-bring-deeper-insight-into-global-soil-moisture [P]
 - CLMS: Soil Water Index 2015–present (raster 1 km), Europe, daily — version 1, strona produktu:
   https://land.copernicus.eu/en/products/soil-moisture/daily-soil-water-index-europe-1km [F]
 - CLMS: „Soil Water Index 2015-2025 (raster 1 km), Europe, daily – version 1 — SUPERSEDED”, dane do VII 2025,

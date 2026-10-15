@@ -949,7 +949,98 @@ def _same_day(year: int, t: pd.Timestamp) -> pd.Timestamp:
     return pd.Timestamp(year=year, month=t.month, day=28 if (t.month == 2 and t.day == 29) else t.day)
 
 
-def water_card(era5: pd.DataFrame, status: Optional[pd.DataFrame], cfg: Dict[str, Any], site_id: str) -> Dict[str, Any]:
+SWI_CLASS_PL = {"dry": "sucho", "normal": "w normie", "wet": "wilgotno"}
+SWI_CLASS_EN = {"dry": "dry", "normal": "near normal", "wet": "wet"}
+
+
+def read_swi(cfg: Dict[str, Any], product: Optional[str] = None) -> Optional[pd.DataFrame]:
+    """Oczyszczony dzienny SWI piksela winnicy zapisany przez task_ingest_swi (None, gdy pliku jeszcze nie ma)."""
+    path = os.path.join(cfg.get("SWI_DIR", ""), f"swi_{product or cfg.get('SWI_PRODUCT', 'v4_0.1deg')}_point.csv")
+    return pd.read_csv(path, parse_dates=["date"]) if os.path.exists(path) else None
+
+
+def _swi_class(p: float, cfg: Dict[str, Any]) -> Optional[str]:
+    """Trzy klasy reguły zgodności (W3a §2): ≤ 30 sucho, 30–70 norma, ≥ 70 wilgotno."""
+    if not np.isfinite(p):
+        return None
+    return "dry" if p <= float(cfg.get("SWI_DRY_PCT", 30)) else ("wet" if p >= float(cfg.get("WATER_WET_PCT", 70))
+                                                                  else "normal")
+
+
+def swi_agreement(pe: pd.Series, ps: pd.Series, cfg: Dict[str, Any], n_boot: int = 1000,
+                  seed: int = 0) -> Dict[str, Any]:
+    """
+    Zgodność klas ERA5–SWI w latach normy SWI_NORM (D-080): odsetek dni z tą samą klasą i kappa Cohena, z 95% CI
+    z bootstrapu po latach (lata jako bloki — dni w roku są silnie zależne). Liczone na macierzach pomyłek lat.
+    """
+    n0, n1 = cfg["SWI_NORM"]
+    df = pd.DataFrame({"e": pe, "s": ps}).loc[n0:n1].dropna()
+    keys = ("dry", "normal", "wet")
+    ix = {k: i for i, k in enumerate(keys)}
+    years = sorted(set(df.index.year))
+    cm = {y: np.zeros((3, 3)) for y in years}
+    for (y, a, b) in zip(df.index.year, df["e"], df["s"]):
+        cm[y][ix[_swi_class(a, cfg)], ix[_swi_class(b, cfg)]] += 1
+
+    def scores(m):
+        n = m.sum()
+        po = np.trace(m) / n
+        pe_ = float((m.sum(axis=1) / n) @ (m.sum(axis=0) / n))
+        return po, (po - pe_) / (1 - pe_) if pe_ < 1 else np.nan
+
+    if not years:
+        return {"po": np.nan, "kappa": np.nan, "po_ci": (np.nan, np.nan), "kappa_ci": (np.nan, np.nan),
+                "n_days": 0, "years": None}
+    po, kappa = scores(sum(cm.values()))
+    lo = hi = (np.nan, np.nan)
+    if n_boot > 0:
+        rng = np.random.default_rng(seed)
+        boots = np.array([scores(sum(cm[years[i]] for i in rng.integers(0, len(years), len(years))))
+                          for _ in range(n_boot)])
+        lo, hi = np.nanpercentile(boots, [2.5, 97.5], axis=0)
+    return {"po": float(po), "kappa": float(kappa), "po_ci": (float(lo[0]), float(hi[0])),
+            "kappa_ci": (float(lo[1]), float(hi[1])), "n_days": int(len(df)), "years": (years[0], years[-1])}
+
+
+def water_satellite(rz: pd.Series, swi: Optional[pd.DataFrame], cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Wiersz satelity karty (Plan v9 W3a; D-075–D-077, D-080): SWI wybranego T (SWI_T) jako percentyl wobec normy
+    SWI_NORM (okno ±CLIM_HALF_WINDOW_DAYS), klasa sucho / norma / wilgotno, zgodność z ERA5-Land liczonym wobec
+    tej samej normy w ostatnim wspólnym dniu, statystyka zgodności w latach normy i jej wrażliwość na T (SWI_T_SENS).
+    None, gdy brak danych SWI.
+    """
+    T = int(cfg.get("SWI_T", 15))
+    if swi is None or not len(swi) or f"swi{T:03d}" not in swi:
+        return None
+    sw = swi.set_index(pd.to_datetime(swi["date"]).dt.floor("D")).sort_index()
+    sw = sw[~sw.index.duplicated(keep="last")]
+    n0, n1 = cfg["SWI_NORM"]
+    hw = int(cfg["CLIM_HALF_WINDOW_DAYS"])
+
+    def pct(series):
+        return s4.clim_anomaly(series.astype(float).dropna(), (n0, n1), hw)["percentile"].dropna()
+
+    ps, pe = pct(sw[f"swi{T:03d}"]), pct(rz)
+    if ps.empty:
+        return None
+    common = ps.index.intersection(pe.index)
+    tc = common.max() if len(common) else None
+    cs = _swi_class(float(ps.loc[tc]), cfg) if tc is not None else None
+    ce = _swi_class(float(pe.loc[tc]), cfg) if tc is not None else None
+    sens = {}
+    for t2 in cfg.get("SWI_T_SENS", ()):
+        c2 = f"swi{int(t2):03d}"
+        if c2 in sw:
+            sens[int(t2)] = swi_agreement(pe, pct(sw[c2]), cfg, n_boot=0)["po"]
+    return {"product": cfg.get("SWI_PRODUCT", "v4_0.1deg"), "T": T, "date": ps.index.max(),
+            "percentile": float(ps.iat[-1]), "class": _swi_class(float(ps.iat[-1]), cfg),
+            "norm": (str(n0)[:4], str(n1)[:4]), "common_date": tc, "class_common": cs, "era5_class_common": ce,
+            "agree": (cs == ce) if tc is not None else None, "agreement": swi_agreement(pe, ps, cfg),
+            "sensitivity_po": sens}
+
+
+def water_card(era5: pd.DataFrame, status: Optional[pd.DataFrame], cfg: Dict[str, Any], site_id: str,
+               swi: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     """
     Dane karty „Woda w winnicy” na ostatni dzień ERA5-Land (słownik zwykłych typów Pythona i pd.Timestamp):
       percentile    — percentyl wilgotności 0–100 cm wobec dni normy CLIM_REF z okna ±CLIM_HALF_WINDOW_DAYS
@@ -959,7 +1050,8 @@ def water_card(era5: pd.DataFrame, status: Optional[pd.DataFrame], cfg: Dict[str
       rank_dry      — miejsce stanu wśród tego samego dnia kalendarza we wszystkich latach ERA5 (1 = najsuchszy),
       since         — pierwszy dzień obecnego ciągu dekad o średnim percentylu ≤ WATER_SINCE_PCT (None, gdy ciągu brak),
       rain          — {dni: suma mm, mediana sum z tego samego okna w latach normy, % normy} dla WATER_PRECIP_DAYS,
-      p_soil        — prawdopodobieństwo suszy w gruncie z ostatniej dekady statusu (step_04.soil_drought_probability).
+      p_soil        — prawdopodobieństwo suszy w gruncie z ostatniej dekady statusu (step_04.soil_drought_probability),
+      satellite     — wiersz satelity SWI (water_satellite; None bez danych SWI).
     """
     e = era5.set_index(pd.to_datetime(era5["time"]).dt.floor("D")).sort_index()
     e = e[~e.index.duplicated(keep="last")]
@@ -1025,7 +1117,8 @@ def water_card(era5: pd.DataFrame, status: Optional[pd.DataFrame], cfg: Dict[str
             "drier_years": drier, "wetter_years": wetter,
             "since": since, "since_dekads": len(run), "since_pct": thr, "rain": rain,
             "p_soil": p_soil, "p_soil_dekad": p_date, "p_under_review": bool(cfg.get("WATER_P_UNDER_REVIEW", True)),
-            "clim_ref": (str(r0)[:4], str(r1)[:4]), "half_window": hw}
+            "clim_ref": (str(r0)[:4], str(r1)[:4]), "half_window": hw,
+            "satellite": water_satellite(rz, swi, cfg) if swi is not None else None}
 
 
 def water_card_json(card: Dict[str, Any]) -> Dict[str, Any]:
@@ -1111,6 +1204,25 @@ def water_card_lines(card: Dict[str, Any], lang: str = "pl") -> Dict[str, Any]:
         lines.append(f"Susza w glebie (percentyl ≤ {num(card['since_pct'])}) od {s:%d.%m.%Y} — {k} "
                      f"{plural_pl(k, 'dekada', 'dekady', 'dekad')}." if pl else
                      f"Soil drought (percentile ≤ {num(card['since_pct'])}) since {s:%Y-%m-%d} — {card['since_dekads']} dekads.")
+    sat = card.get("satellite")
+    if sat:
+        cl = SWI_CLASS_PL if pl else SWI_CLASS_EN
+        ts = pd.Timestamp(sat["date"])
+        txt = (f"Satelita (radar ASCAT, okolica ~10 km, SWI T = {sat['T']}), stan na {ts:%d.%m.%Y}: percentyl "
+               f"{num(sat['percentile'])} wobec {sat['norm'][0]}–{sat['norm'][1]} — {cl[sat['class']]}" if pl else
+               f"Satellite (ASCAT radar, area ~10 km, SWI T = {sat['T']}), as of {ts:%Y-%m-%d}: percentile "
+               f"{num(sat['percentile'])} vs {sat['norm'][0]}–{sat['norm'][1]} — {cl[sat['class']]}")
+        if sat.get("agree") is not None:
+            tc = pd.Timestamp(sat["common_date"])
+            if sat["agree"]:
+                txt += (f"; na {tc:%d.%m.%Y} zgodnie z modelem ERA5-Land (oba: {cl[sat['class_common']]})" if pl else
+                        f"; on {tc:%Y-%m-%d} consistent with the ERA5-Land model (both {cl[sat['class_common']]})")
+            else:
+                txt += (f"; na {tc:%d.%m.%Y} niezgodnie z modelem ERA5-Land (satelita: {cl[sat['class_common']]}, "
+                        f"model: {cl[sat['era5_class_common']]})" if pl else
+                        f"; on {tc:%Y-%m-%d} not consistent with the ERA5-Land model (satellite: "
+                        f"{cl[sat['class_common']]}, model: {cl[sat['era5_class_common']]})")
+        lines.append(txt + ".")
     parts = []
     for n_days, r in sorted(card["rain"].items()):
         if np.isfinite(_float(r["mm"])):
@@ -1140,12 +1252,14 @@ def water_card_lines(card: Dict[str, Any], lang: str = "pl") -> Dict[str, Any]:
 
 
 def water_trust(val: Optional[pd.DataFrame], wval: Optional[pd.DataFrame], thr: Optional[Dict[str, Any]],
-                cfg: Dict[str, Any], lang: str = "pl") -> List[str]:
+                cfg: Dict[str, Any], lang: str = "pl", sat: Optional[Dict[str, Any]] = None) -> List[str]:
     """
     „Na ile ufać” karcie wody (Plan v9 W1b, D-071) — liczby z wyników potoku, nie wpisane na sztywno:
       opad    — ERA5-Land vs deszczomierz Météo-France stacji referencyjnej (validation_weather.csv, sumy 30 dni),
       gleba   — anomalia ERA5-Land 0–100 cm vs ISMN 20–30 cm (validation_anomalies.csv: R z CI, potwierdzone suche
                 dekady = 1 − FAR); prawdopodobieństwo na karcie jest pewnością tej kategorii,
+      satelita — zgodność klas ERA5–SWI w latach normy (odsetek dni, kappa, CI z bootstrapu po latach; D-080)
+                i jej wrażliwość na T; satelity nie porównano jeszcze z czujnikami w gruncie (W2, REF),
       reszta  — niedobór w mm, miejsce wśród lat i „od kiedy”: niezwalidowane (gleba modelu ERA5-Land).
     """
     pl = lang == "pl"
@@ -1191,6 +1305,21 @@ def water_trust(val: Optional[pd.DataFrame], wval: Optional[pd.DataFrame], thr: 
     else:
         out.append("Kategoria gleby: brak wyników walidacji (uruchom task_validate)." if pl
                    else "Soil category: no validation results yet.")
+    ag = (sat or {}).get("agreement") or {}
+    if ag.get("n_days"):
+        pc = lambda x: num(100 * x, 0)
+        y0, y1 = ag["years"]
+        sens = "; ".join(f"T = {t}: {pc(v)}%" for t, v in sorted((sat.get("sensitivity_po") or {}).items()))
+        out.append((f"Satelita a model: ta sama klasa (sucho / norma / wilgotno) w {pc(ag['po'])}% dni {y0}–{y1} "
+                    f"[{pc(ag['po_ci'][0])}; {pc(ag['po_ci'][1])}], kappa = {num(ag['kappa'])} "
+                    f"[{num(ag['kappa_ci'][0])}; {num(ag['kappa_ci'][1])}]"
+                    + (f"; wrażliwość na T: {sens}" if sens else "")
+                    + ". Satelity nie porównano jeszcze z czujnikami w gruncie (W2, REF).") if pl else
+                   (f"Satellite vs model: same class (dry / normal / wet) on {pc(ag['po'])}% of days {y0}–{y1} "
+                    f"[{pc(ag['po_ci'][0])}; {pc(ag['po_ci'][1])}], kappa = {num(ag['kappa'])} "
+                    f"[{num(ag['kappa_ci'][0])}; {num(ag['kappa_ci'][1])}]"
+                    + (f"; sensitivity to T: {sens}" if sens else "")
+                    + ". The satellite has not yet been compared with in-ground sensors (W2, REF)."))
     out.append("Niedobór w mm, miejsce wśród lat i „od kiedy”: niezwalidowane — to wielkości w glebie modelu "
                "ERA5-Land (okolica ~9 km), traktować orientacyjnie." if pl else
                "Deficit in mm, rank among years and drought start: not validated — quantities in the ERA5-Land model "
@@ -1204,6 +1333,7 @@ def _selftest_water(cfg: Dict[str, Any]) -> None:
     osuszonymi: kategoria D4, niedobór > 0, 1. miejsce wśród lat, początek ciągu w pierwszej suchej dekadzie,
     percentyl zgodny z s4.clim_anomaly, opad 0% normy; wariant mokry: kategoria W, brak „Brakuje”. Granice kategorii.
     """
+    import json
     days = pd.date_range("1991-01-01", "2026-09-30", freq="D")
     seas = 0.30 + 0.06 * np.cos(2 * np.pi * (days.dayofyear.to_numpy() - 30) / 365.25)
     yr = ((days.year.to_numpy() - 1995) % 7 - 3) * 0.004               # różne lata; rok 2026 dokładnie w środku
@@ -1232,6 +1362,36 @@ def _selftest_water(cfg: Dict[str, Any]) -> None:
     r2 = " ".join(water_card_lines(dict(card, rank_dry=2, drier_years=[2011, 2003]))["lines"])
     r3 = " ".join(water_card_lines(dict(card, rank_dry=3, drier_years=[2011, 2003]))["lines"])
     assert "bardziej sucho było w roku 2011." in r2 and "bardziej sucho było w latach 2011, 2003." in r3, (r2, r3)
+    # Wiersz satelity (W3a, D-075–D-077, D-080): syntetyczny SWI z tej samej gleby + szum, od 2007 do 13 X 2026
+    # (dane satelitarne świeższe niż ERA5): klasa „sucho”, zgodność z modelem, wysoka zgodność w latach normy
+    cfg_s = dict(cfg, SWI_NORM=("2007-01-01", "2024-12-31"), SWI_T=15, SWI_T_SENS=(10, 40))
+    rz_syn = s4.rootzone(era.set_index("time")).loc["2007-01-01":]
+    rz_syn = pd.concat([rz_syn, pd.Series(rz_syn.iat[-1], index=pd.date_range(rz_syn.index[-1] + pd.Timedelta(days=1),
+                                                                              "2026-10-13"))])
+    lo, hi = float(rz_syn.min()), float(rz_syn.max())
+    rng = np.random.default_rng(1)
+    swi_syn = pd.DataFrame({"date": rz_syn.index})
+    for t2 in (10, 15, 40):
+        swi_syn[f"swi{t2:03d}"] = np.clip(100 * (rz_syn.to_numpy() - lo) / (hi - lo)
+                                          + rng.normal(0, 0.5, len(rz_syn)), 0, 100)
+    cs_ = water_card(era, None, cfg_s, "X", swi=swi_syn)
+    sat = cs_["satellite"]
+    ag = sat["agreement"]
+    assert sat["class"] == "dry" and sat["agree"] and sat["date"] == pd.Timestamp("2026-10-13"), sat
+    assert ag["years"] == (2007, 2024) and ag["po"] > 0.8 and ag["kappa"] > 0.6, ag
+    assert ag["po_ci"][0] <= ag["po"] <= ag["po_ci"][1] and set(sat["sensitivity_po"]) == {10, 40}, ag
+    ls_ = " ".join(water_card_lines(cs_)["lines"])
+    assert "Satelita (radar ASCAT" in ls_ and "zgodnie z modelem ERA5-Land (oba: sucho)" in ls_, ls_
+    assert "Satellite (ASCAT radar" in " ".join(water_card_lines(cs_, "en")["lines"])
+    wet_swi = swi_syn.copy()
+    wet_swi.loc[wet_swi["date"] >= pd.Timestamp("2026-09-01"), ["swi010", "swi015", "swi040"]] = 95.0
+    cw_ = water_card(era, None, cfg_s, "X", swi=wet_swi)
+    lw_ = " ".join(water_card_lines(cw_)["lines"])
+    assert not cw_["satellite"]["agree"] and "niezgodnie z modelem ERA5-Land (satelita: wilgotno, model: sucho)" in lw_, lw_
+    ts_ = " ".join(water_trust(None, None, None, cfg_s, sat=sat))
+    assert "Satelita a model: ta sama klasa" in ts_ and "kappa" in ts_ and "T = 10:" in ts_, ts_
+    assert card["satellite"] is None and "Satelita" not in " ".join(water_card_lines(card)["lines"])
+    json.dumps(water_card_json(cs_))
     wet = era.copy()
     for c in ("sm_l1", "sm_l2", "sm_l3"):
         wet.loc[dry, c] += 0.24
@@ -1243,7 +1403,6 @@ def _selftest_water(cfg: Dict[str, Any]) -> None:
         ["rok", "lata", "lat", "lat", "lata", "lata", "lat"]
     assert [water_category(p, cfg)[0] for p in (0, 2, 2.01, 5, 10, 20, 30, 30.1, 69.9, 70, 100)] == \
         ["D4", "D4", "D3", "D3", "D2", "D1", "D0", "N", "N", "W", "W"]
-    import json
     json.dumps(water_card_json(card))
     wv = pd.DataFrame([
         {"reference": "MF_1", "product": "ERA5L_PRECIP", "segment": "sum_30d", "period": "all", "metric": "pearson_r",

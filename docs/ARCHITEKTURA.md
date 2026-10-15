@@ -45,7 +45,8 @@ Zależności między modułami: `step_05` importuje pozostałe moduły leniwie (
 |---|---|---|
 | `task_ingest_s2` | AOI + bufor 320 m, sezon IV–X, ≤ 40% chmur nad AOI | `data/01_Raw_Sentinel2/S2_L2A_*.tif` |
 | `task_ingest_era5` | centroid winnicy, 1991 → dziś | `data/02_ERA5_Land/era5_land_daily.csv` |
-| `task_probe_swi` | klucze z `SECRETS_DIR` (`cdse.env`), piksel winnicy, ostatni miesiąc | `swi_probe.json` — sonda dostępu do CLMS SWI 1 km (Plan v9 W3a); klucze nie trafiają do wyników |
+| `task_ingest_swi` | klucze z `SECRETS_DIR` (`cdse.env`), piksel winnicy | `SWI_DIR/swi_v4_0.1deg_point.csv` (CLMS SWI 0,1° v4, 2007 – dziś, wiersz satelity na karcie) i `swi_v2_1km_point.csv` (1 km v2 od 13 VII 2025, bez normy); fragmenty kwartalne w `SWI_DIR/cache`; flagi producenta usunięte; klucze nie trafiają do wyników (Plan v9 W3a) |
+| `task_probe_swi` | jak wyżej | `swi_probe.json` — sonda dostępu (diagnostyka; poza notatnikiem) |
 | `task_scene_stats` | nowe sceny (brak w `gwl_observations`), od najnowszej | statystyki obiektów 10 m i 2,5 m (tylko wskaźniki, których pasma przeszły H-SR0/H-SR1); QC SR jako `product = SR_QC` z wersją kontroli w `calib_id`; limit `SR_MAX_SCENES_PER_RUN` na uruchomienie; pokrycie SR w komunikacie (`sr_coverage`); zapis co 25 scen (wznawianie po przerwanej sesji); wycinki NDVI działki dla mapy |
 | `task_anomalies` | ERA5, obserwacje roślinności | `gwl_anomalies`, `gwl_status` (z `p_soil_drought`), `era5_daily_anomalies.csv`, `veg_anomalies.csv` (NDVI, NDRE, NDMI, CRSWIR; kolumny `track`, `ref_mode`), `status_dekads.csv` |
 | `task_validate` | anomalie i status | `gwl_validation_metrics`, `validation_anomalies.csv` (R anomalii vs ISMN 5 cm i 20–30 cm z CI, POD/FAR suchych dekad) |
@@ -150,7 +151,7 @@ python -m pyflakes step_0*.py step_09_panels.py          # znane: 2× undefined 
 | `docs/plans/Plan_v7_precyzja.md` | `PROPOSED` (2026-10-08), etap A wdrożony poza A4/A5; decyzje D-040…D-051 |
 | `docs/plans/Plan_v8_cloud_native_dl.md` | `PROPOSED` (2026-10-14): moduły 1 (A4, A5, cloud-native), 2 (U-Net na ortofotomapie), 3 (rozplątanie sygnału, test); D-052…D-059 |
 | `docs/plans/Plan_v9_woda_w_winnicy.md` | `PROPOSED` (2026-10-14): moduł 1 = „Woda w winnicy”, prototyp w Colab (W1, W2, W4, W5, W6); D-064…D-069 |
-| `docs/evidence/W3a_SWI_1km_satelita.md` | `PROPOSED` (2026-10-14, rewizja 2026-10-15): metoda W3a — CLMS SWI jako satelitarne potwierdzenie stanu gleby; po rewizji SWI 0,1° v4 (jedna wersja 2007–dziś), T = 15; D-074…D-078, D-080 |
+| `docs/evidence/W3a_SWI_1km_satelita.md` | metoda W3a (2026-10-14, rewizja 2026-10-15): CLMS SWI jako satelitarne potwierdzenie stanu gleby — na karcie SWI 0,1° v4 (jedna wersja 2007–dziś), T = 15, norma 2007–2024; 1 km v2 zbierany; D-074…D-078, D-080; wdrożone w `task_ingest_swi`, `step_09.water_satellite` |
 | `docs/evidence/REF_obszar_pomocniczy_ICOS.md` | `PROPOSED` (2026-10-15): obszar pomocniczy z pomiarami w gruncie — FR-Lus (dane bieżące), FR-Aur (historia w Gers); D-082 |
 | `docs/evidence/A4_QC_czujnikow_ISMN.md` | `PROPOSED` (2026-10-14): metoda QC czujników 20/30 cm przed wdrożeniem; D-060…D-063 |
 | `docs/evidence/F4_eksperymenty/`, `F5_asymilacja_danych.md`, `F7_v12/` | dowody do Planu v7 i v1.2 (eksperymenty offline z recenzjami) |

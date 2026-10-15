@@ -404,6 +404,14 @@ MONITOR_CONFIG: Dict[str, Any] = {
     "WATER_P_UNDER_REVIEW": True,         # prawdopodobieństwo z ISMN w rewizji do czasu A4 (Plan v9 W2)
     # Klucze (D-074): tylko z folderu na Dysku obok projektu (MyDrive/GeoWorldLook/secrets), np. cdse.env
     "SECRETS_DIR": "../secrets",
+    # Satelitarny SWI (Plan v9 W3a; docs/evidence/W3a_SWI_1km_satelita.md §0)
+    "SWI_DIR": "data/03_Copernicus_Auxiliary/SWI",
+    "SWI_PRODUCT": "v4_0.1deg",           # wiersz satelity: CLMS SWI 0,1° v4, jedna wersja I 2007 – dziś (D-077)
+    "SWI_T": 15,                          # D-075: Albergel i in. 2008 — Condom 12 dni na 30 cm, mediana SIM 15 dni
+    "SWI_T_SENS": (10, 40),               # wrażliwość na T (raportowana, bez dobierania)
+    "SWI_NORM": ("2007-01-01", "2024-12-31"),  # D-076: wspólna norma SWI i ERA5 dla reguły zgodności
+    "SWI_DRY_PCT": 30,                    # reguła zgodności: ≤ 30 sucho, 30–70 norma, ≥ 70 (WATER_WET_PCT) wilgotno
+    "SWI_1KM": True,                      # zbieramy też SWI 1 km v2 (od 13 VII 2025): bez normy do dłuższej historii
     # Progi statusu (EDO CDI)
     "THR_SPI1": -2.0, "THR_SPI3": -1.0, "THR_SMA": -1.0, "THR_VEG": -1.0,
     "STATUS_START": "2016-01-01",
@@ -442,7 +450,7 @@ MONITOR_CONFIG: Dict[str, Any] = {
 }
 
 _PATH_KEYS = ("PARCELS_PATH", "AOI_PATH", "ISMN_DIR", "S2_DIR", "S2_MANIFEST", "ERA5_DIR", "SR_MODEL_DIR", "MF_DIR",
-              "SR_DIR", "OUTPUT_DIR", "SECRETS_DIR")
+              "SR_DIR", "OUTPUT_DIR", "SECRETS_DIR", "SWI_DIR")
 
 
 def monitor_config(rt: Dict[str, Any], overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -500,6 +508,28 @@ def task_probe_swi(rt: Dict[str, Any], cfg: Dict[str, Any], days: int = 31) -> D
     with open(os.path.join(cfg["OUTPUT_DIR"], "swi_probe.json"), "w", encoding="utf-8") as f:
         json.dump(res, f, indent=1, ensure_ascii=False, default=str)
     return {"message": f"logowanie: {res.get('login')}; {res.get('verdict')}", "probe": res}
+
+
+def task_ingest_swi(rt: Dict[str, Any], cfg: Dict[str, Any], session: Any = None) -> Dict[str, Any]:
+    """
+    Satelitarny SWI piksela winnicy (Plan v9 W3a), przyrostowo: SWI_PRODUCT (0,1° v4, 2007 – dziś) do wiersza
+    satelity na karcie oraz — gdy SWI_1KM — SWI 1 km v2 (od 13 VII 2025), zbierany bez normy. Klucze z SECRETS_DIR
+    (D-074). Zapis: SWI_DIR/swi_<produkt>_point.csv (flagi producenta usunięte), surowe fragmenty w SWI_DIR/cache.
+    """
+    import step_01_ingest as s1
+    lon, lat = _main_site_lonlat(cfg)
+    end = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
+    prods = [cfg["SWI_PRODUCT"]] + (["v2_1km"] if cfg.get("SWI_1KM") and cfg["SWI_PRODUCT"] != "v2_1km" else [])
+    os.makedirs(cfg["SWI_DIR"], exist_ok=True)
+    msgs = []
+    for prod in prods:
+        raw = s1.sync_swi_point(cfg["SECRETS_DIR"], lat, lon, prod, end, os.path.join(cfg["SWI_DIR"], "cache"),
+                                session=session)
+        clean, info = s1.clean_swi(raw)
+        clean.to_csv(os.path.join(cfg["SWI_DIR"], f"swi_{prod}_point.csv"), index=False)
+        msgs.append(f"{prod}: {info['days_ok']} dni z danymi {info['first']}…{info['last']}, "
+                    f"z flagą producenta {info['days_flagged']}")
+    return {"message": "; ".join(msgs)}
 
 
 def task_ingest_era5(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -868,7 +898,8 @@ def task_bulletin(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     extra, warn = [], ""
     try:
         import step_09_panels as s9
-        wc = s9.water_card(pd.read_csv(_era5_csv(cfg), parse_dates=["time"]), status, cfg, cfg["MAIN_SITE"])
+        wc = s9.water_card(pd.read_csv(_era5_csv(cfg), parse_dates=["time"]), status, cfg, cfg["MAIN_SITE"],
+                           swi=s9.read_swi(cfg))
         with open(paths["json"], encoding="utf-8") as f:
             payload = json.load(f)
         payload["water_card"] = s9.water_card_json(wc)
@@ -878,7 +909,8 @@ def task_bulletin(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
         wq = os.path.join(out, "validation_weather.csv")
         tq = os.path.join(out, "hazard_thresholds.json")
         trust_en = s9.water_trust(val, pd.read_csv(wq) if os.path.exists(wq) else None,
-                                  json.load(open(tq)) if os.path.exists(tq) else None, cfg, "en")
+                                  json.load(open(tq)) if os.path.exists(tq) else None, cfg, "en",
+                                  sat=wc.get("satellite"))
         extra.append(f"## Water in the soil (area around the vineyard)\n\n**{wl['headline']}**\n\n"
                      + "\n".join(f"- {x}" for x in wl["lines"]) + "\n\n**How far to trust it**\n\n"
                      + "\n".join(f"- {x}" for x in trust_en) + f"\n\n_{wl['footer']}_\n")
@@ -1008,12 +1040,13 @@ def task_summary(rt: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     try:
         import step_09_panels as s9
         wc = s9.water_card(pd.read_csv(era5_path, parse_dates=["time"]),
-                           pd.read_csv(st_path) if os.path.exists(st_path) else None, cfg, cfg["MAIN_SITE"])
+                           pd.read_csv(st_path) if os.path.exists(st_path) else None, cfg, cfg["MAIN_SITE"],
+                           swi=s9.read_swi(cfg))
         wl = s9.water_card_lines(wc, "pl")
         summary["water_card"] = s9.water_card_json(wc)
         with open(js, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=1, ensure_ascii=False, default=str)
-        trust_pl = s9.water_trust(val, wval, thr, cfg, "pl")
+        trust_pl = s9.water_trust(val, wval, thr, cfg, "pl", sat=wc.get("satellite"))
         water_md = (f"**{wl['headline']}**\n" + "\n".join(f"- {x}" for x in wl["lines"])
                     + "\n\nNa ile ufać:\n" + "\n".join(f"- {x}" for x in trust_pl))
     except Exception as e:
@@ -1095,7 +1128,8 @@ def _selftest(out_dir: str) -> None:
     cfg = monitor_config(rt, {"S2_DIR": os.path.join(out_dir, "s2"), "ERA5_DIR": os.path.join(out_dir, "era5"),
                               "OUTPUT_DIR": os.path.join(out_dir, "out"), "SR_DIR": os.path.join(out_dir, "sr"),
                               "BOOTSTRAP_N": 200, "USE_SR": True, "SR_MAX_SCENES_PER_RUN": None,
-                              "SR_MODEL_DIR": os.path.join(out_dir, "model"), "MF_DIR": os.path.join(out_dir, "mf")})
+                              "SR_MODEL_DIR": os.path.join(out_dir, "model"), "MF_DIR": os.path.join(out_dir, "mf"),
+                              "SWI_DIR": os.path.join(out_dir, "swi"), "SECRETS_DIR": os.path.join(out_dir, "secrets")})
     rng = np.random.default_rng(1)
 
     # Syntetyczne ERA5-Land 1991-2024: cykl roczny + szum AR(1); opad gamma
@@ -1122,6 +1156,37 @@ def _selftest(out_dir: str) -> None:
         mf.to_csv(f, sep=";", index=False)
     era5.to_csv(os.path.join(cfg["MF_DIR"], "era5_32999001", "era5land_19910101_20250101.csv"), index=False)
     ar_s = pd.Series(ar, index=days)
+
+    # Udawany Copernicus Data Space dla SWI (W3a): wartości z gleby syntetycznego ERA5 przeskalowanej do 0–100 + szum,
+    # po 2024 r. mediana dnia roku; klucze w syntetycznym folderze secrets (nigdy prawdziwe)
+    import step_04_metrics_alert as s4
+    os.makedirs(cfg["SECRETS_DIR"], exist_ok=True)
+    with open(os.path.join(cfg["SECRETS_DIR"], "cdse.env"), "w") as f:
+        f.write("CDSE_CLIENT_ID=selftest\nCDSE_CLIENT_SECRET=selftest\n")
+    rz_syn = s4.rootzone(era5.set_index("time"))
+    swi_syn = 100 * (rz_syn - rz_syn.min()) / (rz_syn.max() - rz_syn.min())
+    swi_doy = swi_syn.groupby(swi_syn.index.dayofyear).median()
+    rng_swi = np.random.default_rng(7)
+
+    class FakeCdse:
+        class R:
+            def __init__(self, js):
+                self.status_code, self._js, self.text = 200, js, ""
+
+            def json(self):
+                return self._js
+
+        def post(self, url, data=None, json=None, headers=None, timeout=None):
+            if "token" in url:
+                return self.R({"access_token": "T"})
+            t0 = pd.Timestamp(json["aggregation"]["timeRange"]["from"][:10])
+            t1 = pd.Timestamp(json["aggregation"]["timeRange"]["to"][:10])
+            rows = []
+            for d in pd.date_range(t0, t1, freq="D"):
+                v = float(np.clip(swi_syn.get(d, swi_doy[d.dayofyear]) + rng_swi.normal(0, 2), 0, 100))
+                bands = {f"B{k}": {"stats": {"mean": v, "sampleCount": 1, "noDataCount": 0}} for k in range(8)}
+                rows.append({"interval": {"from": f"{d:%Y-%m-%d}T00:00:00Z"}, "outputs": {"swi": {"bands": bands}}})
+            return self.R({"data": rows})
 
     # Syntetyczne sceny S-2 (12 pasm jak w step_01) na siatce obejmującej winnicę i stację
     parcels = gpd.read_file(cfg["PARCELS_PATH"]).to_crs(cfg["EPSG"])
@@ -1196,7 +1261,8 @@ def _selftest(out_dir: str) -> None:
     s3.load_sen2sr = lambda model_dir, device=None: ("fake", "cpu")
     s3.super_resolve = fake_super_resolve
     try:
-        for name, fn in (("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
+        for name, fn in (("ingest_swi", lambda r, c: task_ingest_swi(r, c, session=FakeCdse())),
+                         ("scene_stats", task_scene_stats), ("anomalies", task_anomalies),
                          ("validate", task_validate),
                          ("weather", lambda r, c: task_weather(r, c, fetch=False)), ("bulletin", task_bulletin),
                          ("dashboard", lambda r, c: task_dashboard(r, c, forecast=False)),
@@ -1245,6 +1311,14 @@ def _selftest(out_dir: str) -> None:
         wjs = json.load(f)["water_card"]
     assert wjs["category"]["code"] and wjs["date"] == "2024-12-31" and "Water in the soil" in bmd, wjs
     assert "Na ile ufać" in dash and "niezwalidowane" in dash and "How far to trust it" in bmd
+    # W3a: SWI pobrany przez zadanie (v4 od 2007 i 1 km v2 od 13 VII 2025), wiersz satelity i zgodność na karcie
+    for prod in ("v4_0.1deg", "v2_1km"):
+        assert os.path.exists(os.path.join(cfg["SWI_DIR"], f"swi_{prod}_point.csv")), prod
+    assert wjs["satellite"]["T"] == 15 and wjs["satellite"]["agreement"]["years"] == [2007, 2024], wjs["satellite"]
+    assert "Satelita (radar ASCAT" in dash and "Satelita a model: ta sama klasa" in dash, "brak wiersza satelity"
+    assert "Satellite (ASCAT radar" in bmd and "Satellite vs model" in bmd
+    print(f"[OK] SWI (W3a): wiersz satelity — {wjs['satellite']['class']}, zgodność z modelem "
+          f"{100 * wjs['satellite']['agreement']['po']:.0f}% dni 2007–2024, kappa {wjs['satellite']['agreement']['kappa']:.2f}")
     wv = pd.read_csv(os.path.join(cfg["OUTPUT_DIR"], "validation_weather.csv"))
     b = wv[(wv["product"] == "ERA5L_TMIN") & (wv["period"] == "all") & (wv["metric"] == "bias")]["value"].iat[0]
     assert abs(b - 1.0) < 0.1, b                    # ERA5 cieplejsze o 1 °C od stacji

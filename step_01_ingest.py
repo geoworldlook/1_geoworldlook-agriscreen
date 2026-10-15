@@ -438,6 +438,16 @@ SWI_SCALE = 0.5                                                   # UINT8 × 1/2
 # Identyfikatory, pasma i skala z dokumentacji Copernicus Data Space (Sentinel Hub, CLMS: swi_europe_1km_daily_v1
 # i _v2, odczyt 2026-10-15). Okna archiwalne sondy (oprócz ostatnich dni w wersji 2): VII 2020 w wersji 1 — czy
 # archiwum odpowiada dla tego punktu; VII 2025 w obu wersjach — czy jest wspólny okres do porównania wersji (D-077).
+SWI_V4_COLLECTION = "byoc-59c08cd0-762b-4b8a-9eaa-0d55d054a732"  # 0,1° v4 (ASCAT): I 2007 – dziś, jedna wersja
+SWI_V4_BANDS = ("SWI001", "SWI005", "SWI010", "SWI015", "SWI020", "SWI040", "SWI060", "SWI100")
+# Produkty do pobierania (Plan v9 W3a, D-077): v4 0,1° — wiersz satelity na karcie (spójny szereg od 2007, dane
+# do 24 h po pomiarze); v2 1 km — zbierany od początku wersji, bez normy do czasu dłuższej historii. Wersji 1 i 2
+# produktu 1 km nie łączymy (PUM SWI 1 km I1.50: „Do not mix various major versions”).
+SWI_PRODUCTS = {
+    "v4_0.1deg": {"collection": SWI_V4_COLLECTION, "bands": SWI_V4_BANDS, "start": "2007-01-01"},
+    "v2_1km": {"collection": SWI_COLLECTION_V2, "bands": SWI_BANDS, "start": "2025-07-13"},
+}
+SWI_FLAG_MIN = 100.0   # wartości > 100% po przeskalowaniu to flagi producenta (241–255: maski, LowQFLAG, brak danych)
 SWI_PROBE_WINDOWS = (("v1_2020-07", SWI_COLLECTION, "2020-07-01", "2020-07-31"),
                      ("v1_2025-07", SWI_COLLECTION, "2025-07-01", "2025-07-31"),
                      ("v2_2025-07", SWI_COLLECTION_V2, "2025-07-01", "2025-07-31"))
@@ -495,16 +505,18 @@ def cdse_token(secrets_dir: str, session: Any = None, timeout: int = 30) -> str:
     return r.json()["access_token"]
 
 
-def _swi_evalscript(bands: Tuple[str, ...] = SWI_BANDS, scale: float = SWI_SCALE) -> str:
+def _swi_evalscript(bands: Tuple[str, ...] = SWI_BANDS, scale: float = SWI_SCALE, ssf: bool = True) -> str:
     vals = ", ".join(f"s.{b} * {scale}" for b in bands)
-    return ("//VERSION=3\nfunction setup() {\n  return {input: [{bands: [" + ", ".join(f'"{b}"' for b in bands)
-            + ', "dataMask"]}],\n          output: [{id: "swi", bands: ' + str(len(bands))
-            + ', sampleType: "FLOAT32"}, {id: "dataMask", bands: 1}]};\n}\n'
-            "function evaluatePixel(s) {\n  return {swi: [" + vals + "], dataMask: [s.dataMask]};\n}\n")
+    inp = ", ".join(f'"{b}"' for b in bands) + (', "SSF"' if ssf else "") + ', "dataMask"'
+    outs = (f'{{id: "swi", bands: {len(bands)}, sampleType: "FLOAT32"}}'
+            + (', {id: "ssf", bands: 1, sampleType: "FLOAT32"}' if ssf else "") + ', {id: "dataMask", bands: 1}')
+    ret = f"swi: [{vals}]" + (", ssf: [s.SSF]" if ssf else "") + ", dataMask: [s.dataMask]"
+    return ("//VERSION=3\nfunction setup() {\n  return {input: [{bands: [" + inp + "]}],\n          output: [" + outs
+            + "]};\n}\nfunction evaluatePixel(s) {\n  return {" + ret + "};\n}\n")
 
 
 def parse_swi_stats(js: Dict[str, Any], bands: Tuple[str, ...] = SWI_BANDS) -> "pd.DataFrame":
-    """Odpowiedź Statistical API -> dzienna tabela: date, swi002…swi100 (średnia w obszarze), n_valid."""
+    """Odpowiedź Statistical API -> dzienna tabela: date, swi<T>… (średnia w obszarze), n_valid, ssf."""
     import pandas as pd
     rows = []
     for entry in js.get("data", []):
@@ -519,14 +531,25 @@ def parse_swi_stats(js: Dict[str, Any], bands: Tuple[str, ...] = SWI_BANDS) -> "
             if n_valid is None and st:
                 n_valid = int(st.get("sampleCount", 0) - st.get("noDataCount", 0))
         row["n_valid"] = n_valid if n_valid is not None else 0
+        sf = entry["outputs"].get("ssf", {}).get("bands", {}).get("B0", {}).get("stats", {})
+        row["ssf"] = sf.get("mean", np.nan) if sf.get("sampleCount", 0) > sf.get("noDataCount", 0) else np.nan
         rows.append(row)
-    cols = ["date"] + [b.lower() for b in bands] + ["n_valid"]
+    cols = ["date"] + [b.lower() for b in bands] + ["n_valid", "ssf"]
     return pd.DataFrame(rows, columns=cols).sort_values("date").reset_index(drop=True) if rows else pd.DataFrame(columns=cols)
 
 
+class CdseHttpError(RuntimeError):
+    """Błąd HTTP Copernicus Data Space z kodem (do ponawiania 401 / 429 / 5xx)."""
+
+    def __init__(self, status: int, msg: str):
+        super().__init__(msg)
+        self.status = status
+
+
 def swi_stats_raw(token: str, lat: float, lon: float, start: str, end: str, half_deg: float = 0.0045,
-                  collection: str = SWI_COLLECTION, session: Any = None, timeout: int = 120) -> Dict[str, Any]:
-    """Surowa odpowiedź Statistical API: dzienny SWI (8 wartości T) dla piksela ~1 km wokół punktu
+                  collection: str = SWI_COLLECTION, session: Any = None, timeout: int = 120,
+                  bands: Tuple[str, ...] = SWI_BANDS) -> Dict[str, Any]:
+    """Surowa odpowiedź Statistical API: dzienny SWI (8 wartości T) i SSF dla piksela wokół punktu
     (bbox ±half_deg w EPSG:4326, 1 × 1 piksel wyjścia)."""
     import requests
     s = session or requests
@@ -536,11 +559,11 @@ def swi_stats_raw(token: str, lat: float, lon: float, start: str, end: str, half
                   "data": [{"type": collection}]},
         "aggregation": {"timeRange": {"from": f"{start}T00:00:00Z", "to": f"{end}T23:59:59Z"},
                         "aggregationInterval": {"of": "P1D"}, "width": 1, "height": 1,
-                        "evalscript": _swi_evalscript()},
+                        "evalscript": _swi_evalscript(bands)},
     }
     r = s.post(CDSE_STATS_URL, json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
     if r.status_code != 200:
-        raise RuntimeError(f"CDSE Statistical API: HTTP {r.status_code}: {r.text[:300]}")
+        raise CdseHttpError(r.status_code, f"CDSE Statistical API: HTTP {r.status_code}: {r.text[:300]}")
     return r.json()
 
 
@@ -549,6 +572,95 @@ def fetch_swi_point(token: str, lat: float, lon: float, start: str, end: str, ha
     """Dzienny SWI (8 wartości T) dla piksela ~1 km wokół punktu jako tabela (parse_swi_stats)."""
     return parse_swi_stats(swi_stats_raw(token, lat, lon, start, end, half_deg=half_deg, collection=collection,
                                          session=session, timeout=timeout))
+
+
+def clean_swi(df: "pd.DataFrame") -> Tuple["pd.DataFrame", Dict[str, Any]]:
+    """
+    Wartości flagowe producenta (> SWI_FLAG_MIN po przeskalowaniu: 241 ExceedingMin, 242 ExceedingMax, 251 WaterMask,
+    252 SensitivityMask, 253 SlopeMask, 254 LowQFLAG, 255 brak danych — PUM SWI 1 km I1.50) i wartości ujemne -> NaN.
+    Zwraca tabelę i liczbę dni: wszystkich, z co najmniej jedną wartością SWI, z flagą w którymkolwiek T.
+    """
+    out = df.copy()
+    cols = [c for c in out.columns if c.startswith("swi")]
+    vals = out[cols].apply(pd.to_numeric, errors="coerce")
+    bad = (vals > SWI_FLAG_MIN) | (vals < 0)
+    out[cols] = vals.mask(bad)
+    info = {"days": int(len(out)), "days_ok": int(out[cols].notna().any(axis=1).sum()),
+            "days_flagged": int(bad.any(axis=1).sum()),
+            "first": str(pd.to_datetime(out["date"]).min().date()) if len(out) else None,
+            "last": str(pd.to_datetime(out.loc[out[cols].notna().any(axis=1), "date"]).max().date())
+            if out[cols].notna().any().any() else None}
+    return out, info
+
+
+class _CdseToken:
+    """Token odświeżany co `max_age` s albo na żądanie (po HTTP 401); klucze tylko z SECRETS_DIR."""
+
+    def __init__(self, secrets_dir: str, session: Any = None, max_age: float = 240.0, clock: Any = time.time):
+        self.secrets_dir, self.session, self.max_age, self.clock = secrets_dir, session, max_age, clock
+        self.value, self.t = None, None
+
+    def get(self, force: bool = False) -> str:
+        if force or self.value is None or self.clock() - self.t > self.max_age:
+            self.value, self.t = cdse_token(self.secrets_dir, session=self.session), self.clock()
+        return self.value
+
+
+def sync_swi_point(secrets_dir: str, lat: float, lon: float, product: str, end: str, cache_dir: str,
+                   start: Optional[str] = None, session: Any = None, chunk_months: int = 3, refetch_days: int = 10,
+                   max_tries: int = 5, sleep: Any = time.sleep) -> "pd.DataFrame":
+    """
+    Dzienny SWI piksela wokół punktu dla produktu z SWI_PRODUCTS, przyrostowo do cache CSV (jeden plik na kwartał).
+    Fragmenty kończące się ponad `refetch_days` dni temu są czytane z cache (także puste — bez ponownych zapytań);
+    nowsze pobierane ponownie (dane bieżące dochodzą i bywają poprawiane). Ponawianie: 401 -> nowy token,
+    429 i 5xx -> odczekanie 2, 4, 8, 16 s. Zwraca surowe wartości (flagi usuwa clean_swi).
+    """
+    spec = SWI_PRODUCTS[product]
+    bands = spec["bands"]
+    cols = ["date"] + [b.lower() for b in bands] + ["n_valid", "ssf"]
+    os.makedirs(cache_dir, exist_ok=True)
+    tok = _CdseToken(secrets_dir, session=session)
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    a = max(pd.Timestamp(start or spec["start"]), pd.Timestamp(spec["start"]))
+    stop = pd.Timestamp(end) + pd.Timedelta(days=1)
+    frames = []
+    while a < stop:
+        b = min(a + pd.DateOffset(months=chunk_months), stop)
+        path = os.path.join(cache_dir, f"swi_{product}_{a:%Y%m%d}_{b:%Y%m%d}.csv")
+        if os.path.exists(path) and b < now - pd.Timedelta(days=refetch_days):
+            frames.append(pd.read_csv(path, parse_dates=["date"]))
+            a = b
+            continue
+        last_status = None
+        for attempt in range(max_tries):
+            try:
+                js = swi_stats_raw(tok.get(force=last_status == 401), lat, lon, f"{a:%Y-%m-%d}",
+                                   f"{b - pd.Timedelta(days=1):%Y-%m-%d}", collection=spec["collection"],
+                                   session=session, bands=bands)
+                break
+            except CdseHttpError as e:
+                last_status = e.status
+                if attempt == max_tries - 1 or not (e.status == 401 or e.status == 429 or e.status >= 500):
+                    raise
+                if e.status != 401:
+                    sleep(2 ** (attempt + 1))
+        else:  # pragma: no cover - pętla kończy się break albo raise
+            raise RuntimeError("SWI: wyczerpane próby")
+        df = parse_swi_stats(js, bands).reindex(columns=cols)
+        df.to_csv(path, index=False)
+        # bieżący fragment kończy się „jutro”, więc co dzień ma inną nazwę: starsze wersje są zbędne
+        for old in glob.glob(os.path.join(cache_dir, f"swi_{product}_{a:%Y%m%d}_*.csv")):
+            if os.path.abspath(old) != os.path.abspath(path):
+                os.remove(old)
+        frames.append(df)
+        logger.info(f"SWI {product}: {a:%Y-%m-%d} -> {b:%Y-%m-%d}, {len(df)} dni")
+        a = b
+    frames = [f for f in frames if len(f)]
+    if not frames:
+        return pd.DataFrame(columns=cols)
+    out = pd.concat(frames, ignore_index=True)
+    out["date"] = pd.to_datetime(out["date"])
+    return out.drop_duplicates("date", keep="last").sort_values("date").reset_index(drop=True)
 
 
 def _swi_window_summary(js: Dict[str, Any]) -> Dict[str, Any]:
@@ -691,7 +803,48 @@ def _selftest_swi() -> None:
     assert err["errors"] == 1 and err["first_error"] == "No data" and err["days_with_data"] == 0, err
     df = parse_swi_stats(stats_js(["2026-10-02", "2026-10-01"]))
     assert list(df["date"]) == [pd.Timestamp("2026-10-01"), pd.Timestamp("2026-10-02")] and df["swi020"].iat[0] == 45.0
+    # Synchronizacja przyrostowa v4: kwartalne fragmenty, cache bez ponownych zapytań, 429 -> ponowienie,
+    # 401 -> nowy token, flagi producenta (> 100%) usuwane przez clean_swi
+    class SyncSession:
+        def __init__(self):
+            self.stats, self.tokens, self.fail = 0, 0, ["429", "401"]
+
+        def post(self, url, data=None, json=None, headers=None, timeout=None):
+            if url == CDSE_TOKEN_URL:
+                self.tokens += 1
+                return Resp(200, {"access_token": f"T{self.tokens}"})
+            assert json["input"]["data"][0]["type"] == SWI_V4_COLLECTION and "SWI015" in json["aggregation"]["evalscript"]
+            if self.fail:
+                code = int(self.fail.pop(0))
+                return Resp(code, {"error": "x"})
+            self.stats += 1
+            t0 = pd.Timestamp(json["aggregation"]["timeRange"]["from"][:10])
+            t1 = pd.Timestamp(json["aggregation"]["timeRange"]["to"][:10])
+            data = []
+            for d in pd.date_range(t0, t1, freq="D"):
+                v = 127.0 if d == pd.Timestamp("2007-02-01") else 30.0 + d.dayofyear / 10
+                bands = {f"B{k}": {"stats": {"mean": v, "sampleCount": 1, "noDataCount": 0}} for k in range(8)}
+                data.append({"interval": {"from": f"{d:%Y-%m-%d}T00:00:00Z"},
+                             "outputs": {"swi": {"bands": bands},
+                                         "ssf": {"bands": {"B0": {"stats": {"mean": 1.0, "sampleCount": 1,
+                                                                           "noDataCount": 0}}}}}})
+            return Resp(200, {"data": data})
+
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "cdse.env"), "w") as f:
+            f.write("CDSE_CLIENT_ID=abc\nCDSE_CLIENT_SECRET=s3cr3t\n")
+        ss = SyncSession()
+        cache = os.path.join(d, "cache")
+        raw = sync_swi_point(d, 43.97, 0.34, "v4_0.1deg", "2007-07-10", cache, session=ss, sleep=lambda x: None)
+        assert ss.stats == 3 and ss.tokens == 2 and len(raw) == 191, (ss.stats, ss.tokens, len(raw))
+        assert list(raw.columns[:3]) == ["date", "swi001", "swi005"] and "ssf" in raw.columns, raw.columns
+        again = sync_swi_point(d, 43.97, 0.34, "v4_0.1deg", "2007-07-10", cache, session=ss, sleep=lambda x: None)
+        assert ss.stats == 3 and len(again) == 191, "fragmenty z 2007 r. muszą pochodzić z cache"
+        cl, info = clean_swi(raw)
+        assert info["days_flagged"] == 1 and info["days_ok"] == 190 and np.isnan(
+            cl.loc[cl["date"] == pd.Timestamp("2007-02-01"), "swi015"].iat[0]), info
     print("[OK] Klucze z Dysku i sonda SWI: pola bez wartości, wersje 1 i 2, wspólny okres, błędy serwera, werdykt.")
+    print("[OK] Synchronizacja SWI v4: fragmenty kwartalne, cache, ponowienie 429, nowy token po 401, flagi usunięte.")
 
 
 # ==============================================================================
