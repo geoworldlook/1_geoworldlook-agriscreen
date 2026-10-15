@@ -1,11 +1,45 @@
 # Plan v9 — „Woda w winnicy”: użyteczna informacja z tego, co AgriScreen już liczy (prototyp w Colab)
 
-Status: PROPOSED, 2026-10-14 (kierunek i forma prototypu zatwierdzone 2026-10-14; specyfikacja W1 do akceptacji).
+Status: PROPOSED, 2026-10-14; uporządkowany 2026-10-15 (§0). Kierunek i forma prototypu zatwierdzone 2026-10-14;
+W1 i W1b wdrożone.
 Przedefiniowuje moduł 1 Planu v8 (D-064). Moduły 2 i 3 Planu v8 (U-Net na ortofotomapie, rozplątanie sygnału)
 zostają jako kolejne moduły. Etapy v7 B–D bez zmian.
 
 **Forma:** prototyp w obecnym układzie — notatnik Colab, Dysk Google, `dashboard.html` (D-068). Publikacja na
 GeoWorldLook i automatyczna aktualizacja dopiero po prototypie.
+
+## 0. Stan, cel i kolejność (porządek z 2026-10-15)
+
+**Cel modułu:** zwalidowana warstwa „woda w winnicy”, w której każda liczba na karcie ma albo wynik walidacji wobec
+niezależnej referencji naziemnej (z przedziałem ufności), albo napis „niezwalidowane”. Testy zapisujemy przed
+liczeniem, wyniki raportujemy niezależnie od kierunku, „przed” i „po” liczymy na tej samej referencji (D-067, D-070).
+Żadnego produktu nie da się uczynić niepodważalnym; da się sprawić, że każde twierdzenie ma dowód i opisaną granicę.
+
+**Zasada produktu:** stan dowolnego pola opisujemy anomalią jego własnego piksela wobec jego historii — nie zalecamy
+podlewania ani zabiegów. Żeby obronić „dowolne pole”, metoda musi działać na co najmniej dwóch niezależnych
+miejscach z pomiarami w gruncie: Condom (obszar główny) i obszar pomocniczy (D-082).
+
+**Stan (2026-10-15):**
+- Wdrożone: W1 (karta wody), W1b („Na ile ufać”), poprawki po pierwszym przebiegu na prawdziwych danych (D-079).
+- W3a: dostęp do SWI potwierdzony (sondy #1, #2); przed pobraniem zmieniony produkt na SWI 0,1° v4 i T = 15
+  (`docs/evidence/W3a_SWI_1km_satelita.md` §0; D-075–D-077 w rewizji, do akceptacji).
+- Referencja naziemna: ISMN (Condom) niedostępny; zaproponowane FR-Lus i FR-Aur z sieci ICOS
+  (`docs/evidence/REF_obszar_pomocniczy_ICOS.md`, D-082, do akceptacji).
+- Słabości, o których piszemy wprost: jedna stacja naziemna z artefaktami czujników (A4), alarm z NDVI bez trafień,
+  brak prawdy terenowej o wodzie w samej winnicy, krótkie normy danych satelitarnych.
+
+**Kolejność (propozycja 2026-10-15, do akceptacji; najpierw walidacja, potem nowe elementy):**
+
+| Etap | Krok | Co | Jedno sprawdzenie |
+|---|---|---|---|
+| I. Warstwa wody zwalidowana | **W3a** | SWI 0,1° v4 2007–dziś, T = 15, wiersz satelity na karcie, zgodność kategorii ERA5–SWI (D-080) | odsetek zgodnych dni i kappa 2007–2024; T = 10 i 40 jako wrażliwość |
+| | **W2** | A4: kontrola czujników (reguły D-060–D-063); kilka czujników na głębokość w ICOS jako kontrola reguł | raport dni oznaczonych, nowe błędy na karcie |
+| | **REF** | obszar pomocniczy: FR-Lus (dane bieżące), FR-Aur (historia w Gers); ta sama metoda bez dostrajania | protokół jak w Condom; na FR-Lus anomalie krótkookresowe |
+| | **W1b+** | sekcja „Jak to liczymy”: tabela źródeł (model / satelita / pomiar, rozdzielczość, opóźnienie) i wyniki walidacji ze wszystkich referencji | każda liczba karty ma wiersz w tabeli |
+| II. Okolica i perspektywa | **W3b** | Sentinel-2 10 m: anomalie działek wobec własnej historii i sąsiadów; „X z N winnic” i zmiana od poprzedniej sceny; bez klas bezwzględnych (D-081) | kalibracja z i reakcja z opóźnieniem (§5b) |
+| | **W4–W6** | 7 dni, 30 dni z lat podobnych, faza winorośli; alert tylko przy nowym pogorszeniu kategorii | jak w tabeli §3 |
+| III. Rozplątanie sygnału | Plan v8, moduły 2–3 | U-Net na ortofotomapie (winorośl / międzyrzędzie / gleba), rozplątanie reflektancji, test H-F6 zahashowany przed uruchomieniem | FAR i opóźnienie składowej winorośli wobec NDVI całego piksela |
+| Później (osobne decyzje) | W3, W7; choroby | publikacja na GeoWorldLook i automatyczna aktualizacja; ryzyko chorób winorośli jako kandydat po W6 (walidacja np. wobec regionalnych biuletynów fitosanitarnych — do sprawdzenia) | — |
 
 ## 1. Cel
 
@@ -87,7 +121,9 @@ Wynik „brak poprawy” też wpisujemy. Tabela żyje w `docs/evidence/karta_wyn
 ## 4. Czego w tym module nie robimy
 
 - Nie mówimy „winorośl jest w stresie”: bez pojemności wodnej działki (Plan v7 C, D) nie da się tego uczciwie powiedzieć (D-066).
-- Bez nowych danych satelitarnych, upraw, chorób i deep learningu.
+- Bez nowych upraw i chorób w tym module (choroby: kandydat po W6). Deep learning (rozplątanie sygnału) dopiero
+  w etapie III, na obszarze Condom; obszar pomocniczy służy walidacji warstwy wody, nie rozplątaniu.
+- Bez bezwzględnych klas „zdrowe / stres” dla wskaźników roślinności (D-081).
 - Bez zaleceń zabiegów: karta opisuje stan i jego znaczenie, decyzja należy do winiarza.
 
 ## 5. Specyfikacja W1 — karta „Woda w winnicy” (do akceptacji przed kodem)
@@ -170,6 +206,23 @@ winorośl/międzyrzędzie (Plan v8, moduł 3), sygnału z odkrytej gleby w SWIR 
 - **D-079 (2026-10-15, po pierwszym przebiegu na prawdziwych danych):** częstość „raz na N lat” w nagłówku karty tylko
   dla N ≤ długość normy (30 lat). Przebieg z 6 X 2026 dał „raz na 58 lat” (percentyl 1,7) przy „2. najsuchszy stan od
   1991 r.” — ekstrapolacja poza 30 lat normy i sprzeczność z rankingiem. Rzadsze stany opisuje sam percentyl i ranking.
+
+- **D-080 (zatwierdzona 2026-10-15):** zgodność kategorii ERA5–SWI mierzona (odsetek zgodnych dni, kappa) i pokazana
+  w „Na ile ufać”, nie zakładana. (Wniosek z przeglądu Siora: tam zgodność klas między metodami jest założona.)
+- **D-081 (zatwierdzona 2026-10-15):** żadnych bezwzględnych klas „zdrowe / marginal / stres” dla wskaźników
+  roślinności; tylko anomalia wobec własnej historii piksela lub działki i wobec sąsiednich winnic. Uzasadnienie:
+  winnica to uprawa rzędowa z międzyrzędziem; mediana NDVI VINEYARD_06 w VII–VIII z 5 lat to ok. 0,45–0,5, więc
+  progi bezwzględne (np. NDVI > 0,5 „zdrowe”) oznaczałyby ją jako „marginal” w każde normalne lato.
+- **Dopiski zatwierdzone 2026-10-15** (z przeglądu Siora): W3b — „X z N winnic” i zmiana od poprzedniej sceny;
+  W1b+ — sekcja „Jak to liczymy”; W4/W7 — alert tylko przy nowym pogorszeniu kategorii, eksport CSV;
+  choroby winorośli — kandydat po W6.
+- **D-075, D-076, D-077 (rewizja 2026-10-15, do akceptacji):** SWI 0,1° v4 (jedna wersja 2007–dziś) zamiast łączenia
+  wersji 1 i 2 produktu 1 km (zalecenie producenta), T = 15 z literatury, norma 2007–2024;
+  `docs/evidence/W3a_SWI_1km_satelita.md` §0.
+- **D-082 (do akceptacji):** obszar pomocniczy FR-Lus (dane bieżące) i referencja historyczna FR-Aur (Gers), sieć ICOS;
+  `docs/evidence/REF_obszar_pomocniczy_ICOS.md`.
+- **Kolejność §0 (do akceptacji):** walidacja (W3a, W2, REF, W1b+) przed nowymi elementami (W3b, W4–W6); zmienia
+  kolejność zatwierdzoną 2026-10-14 (W2 i REF przed W3b).
 
 ## 7. Źródła
 

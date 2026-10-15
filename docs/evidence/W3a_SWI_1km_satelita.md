@@ -1,8 +1,40 @@
-# W3a — satelitarna wilgotność gleby: CLMS Soil Water Index 1 km (notatka metodyczna)
+# W3a — satelitarna wilgotność gleby: CLMS Soil Water Index (notatka metodyczna)
 
-> **Status:** `PROPOSED` (2026-10-14) — metoda ustalona **przed** pobraniem danych SWI i przed jakąkolwiek walidacją
-> (pre-rejestracja jak w A4). Plan v9, krok W3a (D-072). Sonda #1: 2026-10-15 (§4); identyfikatory obu wersji
-> potwierdzone w dokumentacji CDSE; sonda #2 w toku.
+> **Status:** `PROPOSED` (2026-10-14), rewizja 2026-10-15 (§0) — metoda ustalona **przed** pobraniem danych SWI i przed
+> jakąkolwiek walidacją (pre-rejestracja jak w A4). Plan v9, krok W3a (D-072). Sondy dostępu #1 i #2: §4.
+> Nazwa pliku historyczna („1km”): po rewizji wiersz karty korzysta z produktu 0,1° (§0).
+
+## 0. Rewizja przed pobraniem danych (2026-10-15)
+
+Po odblokowaniu dostępu do dokumentacji przeczytałem w pełnym tekście instrukcję produktu i pracę Albergel i in. 2008.
+Dwie rzeczy zmieniają ustalenia z 2026-10-14, zanim pobraliśmy jakikolwiek szereg do analizy.
+
+1. **Wersji 1 i 2 produktu 1 km nie wolno łączyć.** Instrukcja produktu (PUM SWI 1 km, wydanie I1.50, 8 VII 2025):
+   „inconsistencies are expected between product version 2.0.1 and prior versions” (nowa korekta trendu
+   długookresowego i roślinności w danych H SAF), a tabela wersji zaleca dla wersji głównych: „Do not mix various
+   major versions in the same applications”. Wersja 1 kończy się 12 VII 2025, wersja 2 zaczyna 13 VII 2025 (sonda #2:
+   zero wspólnych dni). Test ciągłości na styku (zatwierdzony 2026-10-15) nie usunąłby tej niespójności, bo różnica
+   dotyczy całego rozkładu, nie jednego dnia. **Propozycja D-077 (rewizja):** wiersz satelity na karcie liczymy
+   z **SWI 0,1° wersja 4** (ASCAT, globalny, dziennie), który jest jedną wersją od I 2007 do dziś
+   (`byoc-59c08cd0-762b-4b8a-9eaa-0d55d054a732`; pasma SWI001…SWI100, QFLAG, SSF; UINT8 × 1/2). Produkt 1 km:
+   wersja 1 tylko do porównania skali 1 km z 0,1° w archiwum 2015–2025; wersja 2 trafi na kartę dopiero, gdy będzie
+   miała własną normę (co najmniej 10 lat) albo gdy producent udostępni przeliczone archiwum.
+   Cena tej zmiany: rozdzielczość ~10 km zamiast 1 km, czyli skala podobna do ERA5-Land. Zysk zostaje ten sam co
+   w D-072: niezależne od modelu, satelitarne źródło stanu gleby — i spójny szereg 19 lat.
+2. **T = 15 dni (D-075, wybór z literatury).** Albergel i in. 2008, tabela 2 (filtr wykładniczy na stacjach
+   SMOSMANIA, wilgotność 5 cm → 30 cm): optymalne T od 1 do 23 dni, średnio 6; **dla Condom (CDM) 12 dni**.
+   Dla strefy korzeni w modelu SIM (cała Francja) mediana optymalnego T wynosi **15 dni**. Instrukcja produktu
+   (§2.3): T nie jest głębokością — ta sama wartość T odpowiada różnym głębokościom w różnych glebach, dlatego
+   produkt podaje osiem wartości. Wybieramy **T = 15** (najbliższa dostępna wartość między 12 dla Condom na 30 cm
+   a 15 dla strefy korzeni); **T = 10 i T = 40** jako wrażliwość, jak zapisano 2026-10-14. Wcześniejszy kandydat
+   T = 20 nie miał oparcia w tych liczbach. T nie dobieramy pod ISMN ani pod ERA5.
+3. **Norma 2007–2024 (D-076, rewizja).** Powód wyboru 2015–2024 (SWI 1 km od 2015) przestaje obowiązywać. Percentyl
+   SWI i — dla reguły zgodności — percentyl ERA5 liczymy wobec tej samej normy 2007–2024 (18 lat, okno ±15 dni roku).
+   Kategoria ERA5 na górze karty zostaje wobec 1991–2020.
+4. **Jakość (z instrukcji produktu):** dni z wartością flagową (> 100% po przeskalowaniu, np. 254 = „LowQFLAG”)
+   i ze stanem powierzchni SSF oznaczającym zamarznięcie lub topnienie pomijamy; liczbę pominiętych dni raportujemy.
+5. **D-080 (zatwierdzona 2026-10-15):** zgodność kategorii ERA5–SWI mierzymy (odsetek dni z tą samą kategorią,
+   kappa Cohena, 2007–2024) i pokazujemy na karcie w „Na ile ufać”; nie zakładamy jej.
 
 ## Wynik w skrócie
 
@@ -115,14 +147,16 @@ za 14 IX – 15 X 2026, a filtr katalogu Sentinel Hub nie znalazł kolekcji SWI.
 - Norma 2015–2024 jest krótka i sucha; percentyle SWI nie są porównywalne z kategorią ERA5 wobec 1991–2020.
 - Walidacja tylko na jednej stacji (Condom); inne stacje SMOSMANIA — Plan v7, etap B.
 
-## 8. Decyzje do zatwierdzenia
+## 8. Decyzje
 
-- **D-074:** klucze tylko z `MyDrive/GeoWorldLook/secrets/`, bez wypisywania treści.
-- **D-075:** jedna wartość T wybrana z dokumentacji produktu i literatury przed pobraniem danych (kandydat T = 20);
-  T = 10 i 40 jako wrażliwość; bez dopasowania do ISMN ani ERA5.
-- **D-076:** zgodność ERA5–SWI oceniana na wspólnej normie 2015–2024.
-- **D-077:** jedna spójna wersja archiwum SWI; wersji 1 i 2 nie łączymy bez sprawdzenia przesunięcia.
-- **D-078:** droga A (Copernicus Data Space, Statistical API) jako główna; wymaga pliku `secrets/cdse.env`.
+- **D-074 (stosowana):** klucze tylko z `MyDrive/GeoWorldLook/secrets/`, bez wypisywania treści.
+- **D-075 (rewizja 2026-10-15, do akceptacji):** T = 15 (Albergel i in. 2008: Condom 12 dni na 30 cm, mediana SIM
+  15 dni); T = 10 i 40 jako wrażliwość; bez dopasowania do ISMN ani ERA5.
+- **D-076 (rewizja 2026-10-15, do akceptacji):** zgodność ERA5–SWI oceniana na wspólnej normie 2007–2024.
+- **D-077 (rewizja 2026-10-15, do akceptacji; zastępuje test ciągłości):** wiersz satelity z SWI 0,1° v4 — jedna wersja
+  produktu 2007–dziś; wersji 1 i 2 produktu 1 km nie łączymy (zalecenie producenta).
+- **D-078 (stosowana):** droga A (Copernicus Data Space, Statistical API) z kluczami z `secrets/cdse.env`.
+- **D-080 (zatwierdzona 2026-10-15):** zgodność kategorii ERA5–SWI mierzona i pokazana na karcie.
 
 ## 9. Źródła
 
@@ -145,11 +179,17 @@ Poziom dostępu: P = pełny tekst, A = abstrakt lub streszczenie, F = fragment z
   …/swi_europe_1km_daily_v2.html [P]
 - FEDEO: rekord kolekcji CLMS SWI Europe 1 km daily v2 (COG):
   https://fedeo.ceos.org/series/eo:platform/Sentinel-1/clms_swi_europe_1km_daily_v2_cog [F]
+- CLMS / C-GLOPS1: Product User Manual — Soil Water Index 1 km, wydanie I1.50, 8 VII 2025 (TU Wien, VITO):
+  https://land.copernicus.eu/en/technical-library/product-user-manual-soil-water-index-version-1 [P — przeczytane
+  2026-10-15: §2.3 ograniczenia i zależność T od gleby, progi QFLAG, niespójność wersji 2.0.1, tabela 3 wersji]
+- Copernicus Data Space Ecosystem, dokumentacja Sentinel Hub — CLMS SWI global 12,5 km daily v4 (identyfikator, pasma,
+  zakres 2007–dziś):
+  https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Data/clms/bio-geophysical-parameters/soil-moisture/soil-water-index/swi_global_12.5km_daily_v4.html [P]
 - Bauer-Marschallinger B. i in. 2018. Soil Moisture from Fusion of Scatterometer and SAR: Closing the Scale Gap with
   Temporal Filtering. Remote Sensing 10(7): 1030, doi:10.3390/rs10071030 [A]
 - Albergel C. i in. 2008. From near-surface to root-zone soil moisture using an exponential filter: an assessment of
   the method based on in-situ observations and model simulations. HESS 12: 1323–1337, doi:10.5194/hess-12-1323-2008
-  [F — optymalne T dla SMOSMANIA do odczytania w pełnym tekście przed wyborem T]
+  [P — przeczytane 2026-10-15: tabela 2 (Topt stacji SMOSMANIA, CDM = 12 dni), mediana Topt w SIM = 15 dni]
 - Paulik C. i in. 2014. Validation of the ASCAT Soil Water Index using in situ data from the International Soil
   Moisture Network. Int. J. Appl. Earth Obs. Geoinf., doi:10.1016/j.jag.2014.01.007 [F — zależność T od głębokości
   niepotwierdzona; późniejsze prace podają wyniki niejednoznaczne]

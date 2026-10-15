@@ -150,7 +150,8 @@ python -m pyflakes step_0*.py step_09_panels.py          # znane: 2× undefined 
 | `docs/plans/Plan_v7_precyzja.md` | `PROPOSED` (2026-10-08), etap A wdrożony poza A4/A5; decyzje D-040…D-051 |
 | `docs/plans/Plan_v8_cloud_native_dl.md` | `PROPOSED` (2026-10-14): moduły 1 (A4, A5, cloud-native), 2 (U-Net na ortofotomapie), 3 (rozplątanie sygnału, test); D-052…D-059 |
 | `docs/plans/Plan_v9_woda_w_winnicy.md` | `PROPOSED` (2026-10-14): moduł 1 = „Woda w winnicy”, prototyp w Colab (W1, W2, W4, W5, W6); D-064…D-069 |
-| `docs/evidence/W3a_SWI_1km_satelita.md` | `PROPOSED` (2026-10-14): metoda W3a — CLMS SWI 1 km jako satelitarne potwierdzenie stanu gleby; D-074…D-078 |
+| `docs/evidence/W3a_SWI_1km_satelita.md` | `PROPOSED` (2026-10-14, rewizja 2026-10-15): metoda W3a — CLMS SWI jako satelitarne potwierdzenie stanu gleby; po rewizji SWI 0,1° v4 (jedna wersja 2007–dziś), T = 15; D-074…D-078, D-080 |
+| `docs/evidence/REF_obszar_pomocniczy_ICOS.md` | `PROPOSED` (2026-10-15): obszar pomocniczy z pomiarami w gruncie — FR-Lus (dane bieżące), FR-Aur (historia w Gers); D-082 |
 | `docs/evidence/A4_QC_czujnikow_ISMN.md` | `PROPOSED` (2026-10-14): metoda QC czujników 20/30 cm przed wdrożeniem; D-060…D-063 |
 | `docs/evidence/F4_eksperymenty/`, `F5_asymilacja_danych.md`, `F7_v12/` | dowody do Planu v7 i v1.2 (eksperymenty offline z recenzjami) |
 | `docs/evidence/F6_alerty_strefowe.md` | przegląd i projekt alertów w obrębie działki (niewdrożone) |
