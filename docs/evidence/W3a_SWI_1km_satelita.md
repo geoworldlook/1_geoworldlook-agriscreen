@@ -1,7 +1,7 @@
 # W3a — satelitarna wilgotność gleby: CLMS Soil Water Index 1 km (notatka metodyczna)
 
 > **Status:** `PROPOSED` (2026-10-14) — metoda ustalona **przed** pobraniem danych SWI i przed jakąkolwiek walidacją
-> (pre-rejestracja jak w A4). Plan v9, krok W3a (D-072).
+> (pre-rejestracja jak w A4). Plan v9, krok W3a (D-072). Sonda #1: 2026-10-15 (§4); sonda #2 w toku.
 
 ## Wynik w skrócie
 
@@ -65,6 +65,20 @@ rejestrze ani `run_summary.md`.
 **Pierwszy krok w Colab — sonda (bez analizy):** uwierzytelnienie wybraną drogą, pobranie jednego miesiąca dla piksela
 winnicy, wypisanie nazw pasm, wersji produktu, pierwszej i ostatniej dostępnej daty. Dopiero potem pełny kod.
 
+**Wynik sondy #1 (2026-10-15):** klucze z `secrets/cdse.env` czytane poprawnie (pola `CDSE_CLIENT_ID`,
+`CDSE_CLIENT_SECRET`), logowanie `ok`. Kolekcja `byoc-bd02588b-…` z kodu legacy nie zwróciła żadnego dnia
+za 14 IX – 15 X 2026, a filtr katalogu Sentinel Hub nie znalazł kolekcji SWI.
+
+- **Wyjaśnienie (hipoteza):** strona produktu CLMS opisuje wersję 1 jako **zastąpioną**, z danymi 2015 – VII 2025;
+  od 2025 r. jest wersja 2 (COG). Brak bieżących dni w kolekcji wersji 1 jest więc oczekiwany i sam nie dowodzi
+  złego identyfikatora.
+- **Sonda #2:** opis kolekcji z zakresem czasu; okna VI 2025 i VII 2020 obok ostatnich dni; liczba błędów serwera
+  i pierwszy komunikat; kolekcje SWI w publicznym katalogu STAC wraz z plikami wersji 2 nad winnicą i sposobem
+  dostępu do nich; werdykt w jednym zdaniu.
+- **Konsekwencja dla D-077:** archiwum (wersja 1) i bieżące dni (wersja 2) pochodzą z dwóch wersji produktu.
+  Przed połączeniem porównujemy je w okresie wspólnym, jeśli taki jest. Jeśli go nie ma, normę liczymy z wersji 1,
+  a bieżący percentyl z wersji 2 opisujemy jako „między wersjami, niesprawdzone” — do decyzji po sondzie #2.
+
 ## 5. Sprawdzenie (D-067) i karta wyników (D-070)
 
 - **Walidacja (po A4):** anomalia SWI(T) wobec czujnika ISMN 20–30 cm — ten sam protokół co ERA5 (R z CI z bootstrapu
@@ -106,6 +120,9 @@ Poziom dostępu: P = pełny tekst, A = abstrakt lub streszczenie, F = fragment z
 
 - CLMS: Soil Water Index 2015–present (raster 1 km), Europe, daily — version 1, strona produktu:
   https://land.copernicus.eu/en/products/soil-moisture/daily-soil-water-index-europe-1km [F]
+- CLMS: „Soil Water Index 2015-2025 (raster 1 km), Europe, daily – version 1 — SUPERSEDED”, dane do VII 2025,
+  następca: wersja 2 (2025–): https://land.copernicus.eu/api/en/products/soil-moisture/daily-soil-water-index-europe-1km-v1
+  [F — z wyszukiwania 2026-10-15; strona niedostępna z kontenera asystenta]
 - CLMS: Product User Manual — Soil Water Index 1 km (I1.50, 2025):
   https://land.copernicus.eu/en/technical-library/product-user-manual-soil-water-index-version-1 [F]
 - CLMS: Algorithm Theoretical Basis Document — Soil Water Index:

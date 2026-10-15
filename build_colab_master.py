@@ -64,14 +64,17 @@ cfg = monitor_config(rt)   # zmiany: monitor_config(rt, {'VINEYARDS': {'VINEYARD
 run_task(rt, 'ingest_era5', task_ingest_era5, rt, cfg)"""),
     ("md", """## 3b. Satelitarny SWI 1 km — sonda dostępu (Plan v9 W3a)
 Copernicus Land Soil Water Index 1 km (radar Sentinel-1 + ASCAT) przez Copernicus Data Space. Sonda sprawdza tylko
-dostęp: klucze w `secrets/` (nazwy pól, bez wartości), logowanie, kolekcję SWI w katalogu i ostatni miesiąc dla piksela
-winnicy. Bez analizy. **Prześlij wynik tej komórki** — na jego podstawie powstaje pełne pobieranie i wiersz na karcie.
-Metoda: `docs/evidence/W3a_SWI_1km_satelita.md`."""),
+dostęp: klucze w `secrets/` (nazwy pól, bez wartości), logowanie, zakres czasu kolekcji, SWI piksela winnicy w ostatnich
+dniach i w oknach archiwalnych (VI 2025, VII 2020) z błędami serwera, kolekcje SWI w katalogu STAC (wersja 2) i werdykt.
+Bez analizy. **Prześlij wynik tej komórki** — na jego podstawie powstaje pełne pobieranie i wiersz na karcie.
+Metoda: `docs/evidence/W3a_SWI_1km_satelita.md` (wynik sondy #1 w §4)."""),
     ("code", """import json
 RUN_SWI_PROBE = True          # po zakończeniu W3a sonda zostanie zastąpiona pobieraniem SWI
 if RUN_SWI_PROBE:
     res = run_task(rt, 'probe_swi', task_probe_swi, rt, cfg)
-    print(json.dumps((res or {}).get('probe'), indent=1, ensure_ascii=False, default=str))"""),
+    probe = (res or {}).get('probe') or {}
+    print('WERDYKT:', probe.get('verdict'))
+    print(json.dumps(probe, indent=1, ensure_ascii=False, default=str))"""),
     ("md", "## 4. Indeksy winnicy i stacji: 10 m oraz SEN2SR 2,5 m (kontrola H-SR0/H-SR1, bez zastępstwa interpolacją)"),
     ("code", "run_task(rt, 'scene_stats', task_scene_stats, rt, cfg)"),
     ("md", """## 5. Anomalie, status, walidacja, przymrozki i upały, biuletyn

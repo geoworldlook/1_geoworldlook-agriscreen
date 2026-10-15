@@ -58,6 +58,14 @@ miejsce wśród lat i „od kiedy” opisane jako niezwalidowane (D-071). Mapa W
 klucze z `MyDrive/GeoWorldLook/secrets/cdse.env`, bez wypisywania treści). Czeka na wynik sondy z Colab; potem
 pobieranie całego archiwum i wiersz satelity na karcie.
 
+**Pierwszy przebieg na prawdziwych danych (2026-10-15, ERA5 do 6 X 2026):** karta W1 — wyjątkowa susza (D4,
+percentyl 2 wobec 1991–2020), niedobór ok. 45 mm w 0–100 cm, 2. najsuchszy stan na 6 X od 1991 r. (bardziej sucho
+w 2011), susza od 1 VI (13 dekad), opad 30 dni 65% i 90 dni 54% normy, szansa potwierdzenia przez czujnik 49%.
+Poprawki po przeglądzie: częstość w nagłówku (D-079) i forma „w roku 2011”. Sonda SWI #1: logowanie działa,
+kolekcja z kodu legacy nie zwróciła danych za ostatnie 31 dni. Strona produktu CLMS opisuje wersję 1 jako
+zastąpioną, z danymi 2015 – VII 2025, więc brak bieżących dni jest oczekiwany; sonda #2 sprawdza okna archiwalne,
+błędy serwera i kolekcje SWI w katalogu STAC (wersja 2).
+
 **Po prototypie (osobna decyzja):** W3 — publikacja karty na GeoWorldLook (Supabase, mapa); W7 — automatyczna
 cotygodniowa aktualizacja (GitHub Actions, ERA5-Land z Copernicus Climate Data Store). To część etapu E Planu v8.
 
@@ -158,6 +166,9 @@ winorośl/międzyrzędzie (Plan v8, moduł 3), sygnału z odkrytej gleby w SWIR 
 - **D-073:** W3b — lokalna warstwa Sentinel-2 10 m: anomalie pikseli i działek obszaru wobec własnej historii
   i na tle sąsiednich winnic; opisana jako reakcja roślinności, nie wilgotność gleby.
 - **D-069:** kategorie suszy w glebie wg percentyli US Drought Monitor (NDMC/NOAA; system opisany w Svoboda i in. 2002).
+- **D-079 (2026-10-15, po pierwszym przebiegu na prawdziwych danych):** częstość „raz na N lat” w nagłówku karty tylko
+  dla N ≤ długość normy (30 lat). Przebieg z 6 X 2026 dał „raz na 58 lat” (percentyl 1,7) przy „2. najsuchszy stan od
+  1991 r.” — ekstrapolacja poza 30 lat normy i sprzeczność z rankingiem. Rzadsze stany opisuje sam percentyl i ranking.
 
 ## 7. Źródła
 

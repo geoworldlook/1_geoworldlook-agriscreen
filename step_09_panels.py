@@ -1060,11 +1060,14 @@ def water_card_lines(card: Dict[str, Any], lang: str = "pl") -> Dict[str, Any]:
         head = (f"{card['category']['label'].capitalize()} w glebie" if pl
                 else f"{WATER_LABEL_EN[code].capitalize()} in the soil")
         if pct > 0:
+            # Częstość tylko w zasięgu długości normy (D-079): „raz na 58 lat” z normy 30-letniej to ekstrapolacja
+            # i przeczyłaby miejscu wśród lat; rzadsze stany opisuje sam percentyl i ranking poniżej
             every = max(1, int(round(100.0 / pct)))
-            head += (f" — tak sucho jest o tej porze średnio raz na {every} {plural_pl(every, 'rok', 'lata', 'lat')}"
-                     if pl and every > 1 else
-                     " — tak sucho jest o tej porze co roku" if pl else
-                     f" — this dry at this time of year about once in {every} years")
+            if every <= int(c1) - int(c0) + 1:
+                head += (f" — tak sucho jest o tej porze średnio raz na {every} {plural_pl(every, 'rok', 'lata', 'lat')}"
+                         if pl and every > 1 else
+                         " — tak sucho jest o tej porze co roku" if pl else
+                         f" — this dry at this time of year about once in {every} years")
         else:
             head += (f" — suszej niż w każdym roku normy {c0}–{c1}" if pl else f" — drier than any year of {c0}–{c1}")
     elif code == "W":
@@ -1098,7 +1101,8 @@ def water_card_lines(card: Dict[str, Any], lang: str = "pl") -> Dict[str, Any]:
                f"({n} {plural_pl(n, 'rok', 'lata', 'lat')})" if pl
                else f"{'The ' if rank == 1 else f'{rank}{ordinal} '}{word} {day} since {y0} ({n} years)")
         if 1 < rank <= 5:
-            txt += (f"; bardziej {'sucho' if dry_side else 'wilgotno'} było w latach {', '.join(map(str, years[:rank - 1]))}"
+            txt += (f"; bardziej {'sucho' if dry_side else 'wilgotno'} było w {'roku' if rank == 2 else 'latach'} "
+                    f"{', '.join(map(str, years[:rank - 1]))}"
                     if pl else f"; {'drier' if dry_side else 'wetter'} in {', '.join(map(str, years[:rank - 1]))}")
         lines.append(txt + ".")
     if card["since"] is not None:
@@ -1220,6 +1224,14 @@ def _selftest_water(cfg: Dict[str, Any]) -> None:
     assert "w rewizji" not in " ".join(txt["lines"])                       # bez statusu nie ma prawdopodobieństwa
     en = water_card_lines(card, "en")
     assert en["headline"].startswith("Exceptional drought") and "missing" in en["lines"][0], en
+    # Częstość tylko w zasięgu normy 30 lat (D-079): percentyl 1,7 → bez „raz na 59 lat”; percentyl 10 → „raz na 10 lat”
+    h_rare = water_card_lines(dict(card, percentile=1.7))["headline"]
+    d2 = dict(card, percentile=10.0, category=dict(card["category"], code="D2", label="silna susza"))
+    assert "raz na" not in h_rare and "(percentyl 2 wobec 1991–2020)" in h_rare, h_rare
+    assert "raz na 10 lat" in water_card_lines(d2)["headline"], water_card_lines(d2)["headline"]
+    r2 = " ".join(water_card_lines(dict(card, rank_dry=2, drier_years=[2011, 2003]))["lines"])
+    r3 = " ".join(water_card_lines(dict(card, rank_dry=3, drier_years=[2011, 2003]))["lines"])
+    assert "bardziej sucho było w roku 2011." in r2 and "bardziej sucho było w latach 2011, 2003." in r3, (r2, r3)
     wet = era.copy()
     for c in ("sm_l1", "sm_l2", "sm_l3"):
         wet.loc[dry, c] += 0.24
